@@ -8,9 +8,9 @@ against a simulator, then deploy unchanged to the nav PCs.
 
 - **Web app** (repo root) — the monitor and the tests. Static HTML/JS, no build,
   works offline.
-- **`simulator`** — a two-boat NMEA simulator for developing on this computer.
+- **`simulator/`** — a two-boat NMEA simulator for developing on this computer.
   See `simulator/README.md`.
-- **`bridge`** — the on-boat server: reads Expedition's UDP and re-serves it as a
+- **`bridge/`** — the on-boat server: reads Expedition's UDP and re-serves it as a
   WebSocket, and serves the app over http. See `bridge/README.md`.
 
 The app connects the same way to the simulator or to the bridges, so nothing in
@@ -73,14 +73,18 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
        (windward positive).
      - **FWD/BACK gain** and **UP/DOWN gain** = each distance now minus its value
        at the start.
-     - Equivalently, all three gains are the relative displacement (reference boat
-       minus other, from the start) projected onto the TWD axis, the average-path
-       axis, and its perpendicular. Two plots show VMG gain and the UP/DOWN &
-       FWD/BACK gains over the run. Auto-stops at the duration; **Stop** ends
-       early; **Close** returns.
-   - **VMC test / TWA test** — buttons are in place; the calculations aren't built
-     yet (VMC needs a target bearing/mark). Tell me the definitions and they fill
-     in.
+     - Two plots show VMG gain and the UP/DOWN & FWD/BACK gains over the run.
+   - **VMC test** and **TWA test** — same maths, but the primary axis is the
+     **bearing to a waypoint** instead of the TWD. Pressing the button asks for the
+     waypoint **range and bearing** (prefilled with the reference boat's current
+     heading and **20 nm** for VMC, **2 nm** for TWA); the waypoint is dropped at
+     that range/bearing from the boats' start midpoint. **VMC gain** = the boat
+     separation projected on the bearing to the waypoint, now minus at the start.
+     A distant (VMC) waypoint gives an almost fixed bearing; a close (TWA) one
+     shifts as you approach. FWD/BACK and UP/DOWN are the same as in the VMG test.
+   - **Stop, then review** — stopping a test lets you **trim** the last N seconds
+     (e.g. if the boats bore away at the end) and recompute, then **Save** it to
+     the history or **Discard** it.
 4. **Live dashboard** (always on the main page, for master and viewers alike):
    - **Range & bearing** between the two boats, in metres and degrees true
      (boat 1 → boat 2), updated continuously.
@@ -90,9 +94,12 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
      tiles); if you later want a geographic basemap where there's signal, that can
      be added.
    - **Strip charts** — the last 2 minutes of **BS, COG, TWA, HEEL, RUDDER, TWD,
-     TWS**, one trace per boat, with each boat's current value in the header. TWA
-     is derived from COG and TWD. Wrapping channels (COG/TWD) break cleanly at
-     360/0 instead of drawing a false spike.
+     TWS**, one trace per boat, with each boat's current value **and its average
+     since the test started** (`x̄`) in the header. TWA is derived from COG and TWD.
+     Wrapping channels (COG/TWD) break cleanly at 360/0 instead of a false spike.
+5. **Test history** — at the bottom of the page, one row per saved test: start
+   time, type (VMG/VMC/TWA), duration, winner, gain rate, FWD/BACK and UP/DOWN
+   metres. **Export CSV** downloads the table. History is stored on the device.
 
 The simulator now also sends boat speed (`VHW`), heel (`XDR/ROLL`) and rudder
 (`RSA`) so all six strips have data on the desk. On a real boat these come from
@@ -106,7 +113,7 @@ Distances integrate over the test: windward = ∫VMG dt, sailed = ∫SOG dt.
 
 ## Deploy to the boats
 
-Per boat PC: install the `bridge`, point Expedition's UDP at it, and run it (see
+Per boat PC: install the `bridge/`, point Expedition's UDP at it, and run it (see
 `bridge/README.md`). Then in the app's **Settings**, set the two boats to each
 bridge's address, e.g. `ws://192.168.1.101:8080` and `ws://192.168.1.102:8080`.
 
@@ -128,5 +135,5 @@ git remote add origin https://github.com/<owner>/Django-2-boat-testing.git
 git push -u origin main
 ```
 
-`node_modules/` is gitignored; each person runs `npm install` in `simulator`
-and `bridge` once.
+`node_modules/` is gitignored; each person runs `npm install` in `simulator/`
+and `bridge/` once.

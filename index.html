@@ -41,7 +41,12 @@
         <div class="testview__controls">
           <div class="ref-switch" id="ref-switch"></div>
           <button class="danger-btn" id="test-stop" type="button">Stop</button>
-          <button class="ghost-btn" id="test-close" type="button" hidden>Close</button>
+          <div class="review" id="test-review" hidden>
+            <label class="review__trim">Trim last <input id="trim-sec" type="number" min="0" step="1" value="0" inputmode="numeric"> s</label>
+            <button class="ghost-btn" id="trim-apply" type="button">Apply</button>
+            <button class="ghost-btn" id="test-discard" type="button">Discard</button>
+            <button class="primary-btn" id="test-save" type="button">Save</button>
+          </div>
         </div>
       </div>
       <div class="progress"><div class="progress__bar" id="test-progress"></div></div>
@@ -79,14 +84,29 @@
       </figure>
 
       <section class="strips" id="strips">
-        <figure class="strip"><figcaption>BS <span class="strip__unit">kn</span><span class="strip__vals" id="val-bs"></span></figcaption><canvas id="strip-bs"></canvas></figure>
-        <figure class="strip"><figcaption>COG <span class="strip__unit">°</span><span class="strip__vals" id="val-cog"></span></figcaption><canvas id="strip-cog"></canvas></figure>
-        <figure class="strip"><figcaption>TWA <span class="strip__unit">°</span><span class="strip__vals" id="val-twa"></span></figcaption><canvas id="strip-twa"></canvas></figure>
-        <figure class="strip"><figcaption>HEEL <span class="strip__unit">°</span><span class="strip__vals" id="val-heel"></span></figcaption><canvas id="strip-heel"></canvas></figure>
-        <figure class="strip"><figcaption>RUDDER <span class="strip__unit">°</span><span class="strip__vals" id="val-rudder"></span></figcaption><canvas id="strip-rudder"></canvas></figure>
-        <figure class="strip"><figcaption>TWD <span class="strip__unit">°</span><span class="strip__vals" id="val-twd"></span></figcaption><canvas id="strip-twd"></canvas></figure>
-        <figure class="strip"><figcaption>TWS <span class="strip__unit">kn</span><span class="strip__vals" id="val-tws"></span></figcaption><canvas id="strip-tws"></canvas></figure>
+        <figure class="strip"><figcaption>BS <span class="strip__unit">kn</span><span class="strip__vals" id="val-bs"></span></figcaption><div class="strip__body"><canvas id="strip-bs"></canvas><div class="strip__avgbox" id="avg-bs"></div></div></figure>
+        <figure class="strip"><figcaption>COG <span class="strip__unit">°</span><span class="strip__vals" id="val-cog"></span></figcaption><div class="strip__body"><canvas id="strip-cog"></canvas><div class="strip__avgbox" id="avg-cog"></div></div></figure>
+        <figure class="strip"><figcaption>TWA <span class="strip__unit">°</span><span class="strip__vals" id="val-twa"></span></figcaption><div class="strip__body"><canvas id="strip-twa"></canvas><div class="strip__avgbox" id="avg-twa"></div></div></figure>
+        <figure class="strip"><figcaption>HEEL <span class="strip__unit">°</span><span class="strip__vals" id="val-heel"></span></figcaption><div class="strip__body"><canvas id="strip-heel"></canvas><div class="strip__avgbox" id="avg-heel"></div></div></figure>
+        <figure class="strip"><figcaption>RUDDER <span class="strip__unit">°</span><span class="strip__vals" id="val-rudder"></span></figcaption><div class="strip__body"><canvas id="strip-rudder"></canvas><div class="strip__avgbox" id="avg-rudder"></div></div></figure>
+        <figure class="strip"><figcaption>TWD <span class="strip__unit">°</span><span class="strip__vals" id="val-twd"></span></figcaption><div class="strip__body"><canvas id="strip-twd"></canvas><div class="strip__avgbox" id="avg-twd"></div></div></figure>
+        <figure class="strip"><figcaption>TWS <span class="strip__unit">kn</span><span class="strip__vals" id="val-tws"></span></figcaption><div class="strip__body"><canvas id="strip-tws"></canvas><div class="strip__avgbox" id="avg-tws"></div></div></figure>
       </section>
+    </section>
+
+    <section class="history" id="history" hidden>
+      <div class="history__head">
+        <h2>Test history</h2>
+        <button class="ghost-btn" id="export-csv" type="button">Export CSV</button>
+      </div>
+      <div class="history__scroll">
+        <table class="history__table">
+          <thead>
+            <tr><th>Start</th><th>Type</th><th>Duration</th><th>Winner</th><th>Gain rate</th><th>FWD/BACK</th><th>UP/DOWN</th></tr>
+          </thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
     </section>
 
     <details class="streams-wrap">
@@ -114,6 +134,14 @@
       <label class="field">Duration (minutes)
         <input type="number" id="duration-input" min="1" step="1" value="5" inputmode="numeric" />
       </label>
+      <div id="wp-fields" hidden>
+        <label class="field">Waypoint range (nm)
+          <input type="number" id="wp-rng" step="0.1" value="20" inputmode="decimal" />
+        </label>
+        <label class="field">Waypoint bearing (°)
+          <input type="number" id="wp-brg" step="1" value="0" inputmode="numeric" />
+        </label>
+      </div>
       <div class="modal__actions">
         <button class="ghost-btn" id="duration-cancel" type="button">Cancel</button>
         <button class="primary-btn" id="duration-start" type="button">Start</button>

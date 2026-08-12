@@ -227,6 +227,18 @@ function sampleHistory(now) {
     const cut = now - HIST_MS;
     while (rt.hist.length && rt.hist[0].t < cut) rt.hist.shift();
 
+    // running per-channel average since the test started
+    if (state.test && state.test.running) {
+      if (!rt.tavg) rt.tavg = {};
+      const vals = { bsp: l.bsp, cog: l.cog, twa, heel: l.heel, rudder: l.rudder, twd: l.twd, tws: l.tws };
+      for (const ch of CHANNELS) {
+        const v = vals[ch.key];
+        if (v == null || Number.isNaN(v)) continue;
+        const a = rt.tavg[ch.key] || (rt.tavg[ch.key] = { sum: 0, sin: 0, cos: 0, n: 0 });
+        a.n++; a.sum += v; const r = v * Math.PI / 180; a.sin += Math.sin(r); a.cos += Math.cos(r);
+      }
+    }
+
     if (l.lat != null && l.lon != null) {
       const last = rt.track[rt.track.length - 1];
       const moved = last ? S.rangeBearing(last.lat, last.lon, l.lat, l.lon).rangeM : Infinity;
@@ -275,6 +287,16 @@ function renderDashboard(now) {
         const txt = (v == null || Number.isNaN(v)) ? '—' : (+v).toFixed(ch.dp);
         return `<span style="color:${rt.color}">${txt}</span>`;
       }).join('<span class="strip__sep">·</span>');
+    }
+    const avgEl = $(`avg-${ch.id}`);
+    if (avgEl) {
+      const rows = rts.map((rt) => {
+        const a = state.test && rt.tavg && rt.tavg[ch.key];
+        const txt = (!a || !a.n) ? '—'
+          : (ch.angular ? (Math.atan2(a.sin, a.cos) * 180 / Math.PI + 360) % 360 : a.sum / a.n).toFixed(ch.dp);
+        return `<span class="avgrow"><span class="avgdot" style="background:${rt.color}"></span><span class="avgval" style="color:${rt.color}">${txt}</span></span>`;
+      }).join('');
+      avgEl.innerHTML = `<span class="avglabel">avg${state.test ? '' : ' · run a test'}</span>${rows}`;
     }
   }
 }
@@ -345,12 +367,21 @@ function renderStatusList(now) {
   if (!state.rt.size) list.textContent = 'No boats configured.';
 }
 
-/* ---------- duration modal ---------- */
+/* ---------- setup modal ---------- */
 let pendingTest = null;
-function openDuration(type) {
+function openSetup(type) {
   pendingTest = type;
   $('duration-title').textContent = `${type} test`;
   $('duration-input').value = '5';
+  const wp = $('wp-fields');
+  if (type === 'VMG') { wp.hidden = true; }
+  else {
+    wp.hidden = false;
+    const rt0 = [...state.rt.values()][0];
+    const hd = rt0 && rt0.live ? (rt0.live.hdg != null ? rt0.live.hdg : rt0.live.cog) : null;
+    $('wp-brg').value = hd != null ? Math.round(hd) : 0;
+    $('wp-rng').value = type === 'VMC' ? '20' : '2';
+  }
   $('duration-modal').hidden = false;
 }
 
@@ -364,33 +395,36 @@ function testBoats() {
   }));
 }
 
-function startVMG(durationSec) {
+function startTest(type, durationSec, wpRngNm, wpBrg) {
   const boats = testBoats();
-  if (boats.length < 2) { alert('The VMG test compares two boats. Configure both in Settings.'); return; }
+  if (boats.length < 2) { alert('The test compares two boats. Configure both in Settings.'); return; }
+
+  for (const b of boats) b.rt.tavg = {};   // reset strip averages for this test
 
   state.test = {
-    type: 'VMG', durationSec, startTs: Date.now(), running: true,
+    type, durationSec, startTs: Date.now(), running: true,
     boats, refId: boats[0].id, twdRef: null,
-    samples: [],                     // [{ t, p:[{lat,lon,twd},{lat,lon,twd}] }] both boats fixed
-    series: { vmg: [], up: [], fwd: [] },
+    samples: [], waypoint: null, trimSec: 0, result: null,
+    wp: (type === 'VMG') ? null : { rngM: (wpRngNm || (type === 'VMC' ? 20 : 2)) * NM_TO_M, brg: wpBrg || 0 },
+    series: { primary: [], up: [], fwd: [] },
     timer: null,
   };
 
-  $('test-title').textContent = 'VMG test';
+  $('test-title').textContent = `${type} test`;
   $('test-duration').textContent = mmss(durationSec);
   $('test-status').textContent = 'Running';
   $('test-stop').hidden = false;
-  $('test-close').hidden = true;
+  $('test-review').hidden = true;
   $('test-view').hidden = false;
 
   buildRefSwitch(boats);
-  buildTiles();
+  buildTiles(type);
   if (!chartVMG) chartVMG = new LineChart($('chart-vmg'));
   if (!chartUP) chartUP = new LineChart($('chart-up'));
 
   clearInterval(state.test.timer);
-  state.test.timer = setInterval(sampleVMG, 1000);
-  sampleVMG();
+  state.test.timer = setInterval(sampleTest, 1000);
+  sampleTest();
 }
 
 function buildRefSwitch(boats) {
@@ -415,10 +449,11 @@ function buildRefSwitch(boats) {
 }
 
 const tileEls = {};
-function buildTiles() {
+function buildTiles(type) {
   const wrap = $('test-tiles'); wrap.innerHTML = '';
-  tileEls.dvmg = tile(wrap, 'delta', 'VMG gain', 'delta');
-  tileEls.rate = tile(wrap, 'delta', 'VMG gain / min', 'delta');
+  const primary = type === 'VMG' ? 'VMG' : 'VMC';
+  tileEls.dvmg = tile(wrap, 'delta', `${primary} gain`, 'delta');
+  tileEls.rate = tile(wrap, 'delta', `${primary} gain / min`, 'delta');
   tileEls.dfwd = tile(wrap, 'delta', 'FWD/BACK gain', 'delta');
   tileEls.dup = tile(wrap, 'delta', 'UP/DOWN gain', 'delta');
 }
@@ -444,109 +479,147 @@ function enu(lat, lon, lat0, lon0) {
   return { e: (lon - lon0) * lonM, n: (lat - lat0) * LAT_M };
 }
 
-function sampleVMG() {
+const NM_TO_M = 1852;
+function destPoint(lat, lon, brgDeg, distM) {
+  const LAT_M = 111132, lonM = 111320 * Math.cos(lat * Math.PI / 180);
+  const r = brgDeg * Math.PI / 180;
+  return { lat: lat + (distM * Math.cos(r)) / LAT_M, lon: lon + (distM * Math.sin(r)) / lonM };
+}
+// Working samples after trimming the last trimSec seconds.
+function effectiveSamples(t) {
+  if (!t.samples.length) return [];
+  const cut = t.samples[t.samples.length - 1].t - (t.trimSec || 0) * 1000;
+  return t.samples.filter((s) => s.t <= cut);
+}
+
+function sampleTest() {
   const t = state.test; if (!t || !t.running) return;
   const now = Date.now();
-  // Record a paired sample only when BOTH boats have a fresh fix.
   const p = t.boats.map((b) => {
     const l = b.rt.live;
     const fresh = l && (now - (l.ts || 0)) < LIVE_MS;
     return (fresh && l.lat != null && l.lon != null) ? { lat: l.lat, lon: l.lon, twd: l.twd } : null;
   });
-  if (p[0] && p[1]) t.samples.push({ t: now, p });
-  renderVMG();
+  if (p[0] && p[1]) {
+    t.samples.push({ t: now, p });
+    // Place the waypoint at the first paired sample (VMC/TWA).
+    if (!t.waypoint && t.wp && t.samples.length >= 1) {
+      const s0 = t.samples[0];
+      const mid = { lat: (s0.p[0].lat + s0.p[1].lat) / 2, lon: (s0.p[0].lon + s0.p[1].lon) / 2 };
+      t.waypoint = destPoint(mid.lat, mid.lon, t.wp.brg, t.wp.rngM);
+    }
+  }
+  renderTest();
   const elapsed = (now - t.startTs) / 1000;
   $('test-elapsed').textContent = mmss(Math.min(elapsed, t.durationSec));
   $('test-progress').style.width = `${Math.min(100, (elapsed / t.durationSec) * 100)}%`;
   if (elapsed >= t.durationSec) finishTest('Complete');
 }
 
-// Gains at sample index k, following the written definitions. All three gains are
-// the relative displacement ΔD = (ref boat's start→now) − (other boat's start→now)
-// projected onto three axes:
-//   VMG GAIN      = ΔD · TWD-axis
-//   FWD/BACK GAIN = ΔD · average-path axis (start-midpoint → now-midpoint)
-//   UP/DOWN GAIN  = ΔD · perpendicular of the average path (windward = +)
-function gainsAt(t, refIdx, othIdx, twdRefK, k) {
-  const s0 = t.samples[0], sk = t.samples[k];
-  const D0 = enu(sk.p[0].lat, sk.p[0].lon, s0.p[0].lat, s0.p[0].lon);
-  const D1 = enu(sk.p[1].lat, sk.p[1].lon, s0.p[1].lat, s0.p[1].lon);
-  const Dref = refIdx === 0 ? D0 : D1;
-  const Doth = othIdx === 0 ? D0 : D1;
-  const dE = Dref.e - Doth.e, dN = Dref.n - Doth.n;              // ΔD
-
-  let vmg = null;
-  if (twdRefK != null) {
-    const wr = twdRefK * Math.PI / 180;
-    vmg = dE * Math.sin(wr) + dN * Math.cos(wr);                 // ΔD along TWD axis
-  }
-
-  let fwd = null, up = null;
-  const aE = (D0.e + D1.e) / 2, aN = (D0.n + D1.n) / 2;          // average-path vector
-  const alen = Math.hypot(aE, aN);
-  if (alen >= 1) {
-    const ux = aE / alen, uy = aN / alen;                        // along average path
-    let px = -uy, py = ux;                                       // perpendicular
-    if (twdRefK != null) {                                       // orient UP toward the wind
-      const wr = twdRefK * Math.PI / 180;
-      if (px * Math.sin(wr) + py * Math.cos(wr) < 0) { px = -px; py = -py; }
-    }
-    fwd = dE * ux + dN * uy;
-    up = dE * px + dN * py;
-  }
-  return { vmg, fwd, up };
-}
-
-function renderVMG() {
-  const t = state.test; if (!t) return;
+// All gains follow the supplied definitions. The PRIMARY gain projects the boat
+// separation on: the TWD axis (VMG) or the bearing to the waypoint (VMC/TWA).
+// FWD/BACK and UP/DOWN project the relative displacement on the average-path axis
+// and its perpendicular. Every gain = value(now) − value(start).
+function computeGains(t) {
+  const work = effectiveSamples(t);
   const refIdx = Math.max(0, t.boats.findIndex((b) => b.id === t.refId));
   const othIdx = refIdx === 0 ? 1 : 0;
+  const res = { series: { primary: [], up: [], fwd: [] }, cur: null, twdOverall: null, refIdx, othIdx };
+  if (work.length < 1) return res;
 
-  const overallTwd = [];
-  for (const s of t.samples) { if (s.p[0].twd != null) overallTwd.push(s.p[0].twd); if (s.p[1].twd != null) overallTwd.push(s.p[1].twd); }
-  const twdOverall = circMeanDeg(overallTwd);
-  t.twdRef = twdOverall;
-  $('test-meta').innerHTML =
-    `Ref <b style="color:${t.boats[refIdx].color}">${t.boats[refIdx].name}</b> · TWD used ` +
-    (twdOverall == null ? '—' : `${String(Math.round(twdOverall)).padStart(3, '0')}°`);
+  const origin = work[0].p[0];
+  const P = (s, i) => enu(s.p[i].lat, s.p[i].lon, origin.lat, origin.lon);
+  let wpE = null, wpN = null;
+  if (t.waypoint) { const w = enu(t.waypoint.lat, t.waypoint.lon, origin.lat, origin.lon); wpE = w.e; wpN = w.n; }
 
-  const dashes = () => { for (const k of ['dvmg', 'rate', 'dfwd', 'dup']) setDelta(k, 0, '', '', 0, true); };
-  if (t.samples.length < 2) { dashes(); return; }
+  const primaryAxis = (midE, midN, twdK) => {
+    if (t.type === 'VMG') { if (twdK == null) return null; const r = twdK * Math.PI / 180; return { x: Math.sin(r), y: Math.cos(r) }; }
+    if (wpE == null) return null;
+    const vx = wpE - midE, vy = wpN - midN, l = Math.hypot(vx, vy);
+    return l < 1e-6 ? null : { x: vx / l, y: vy / l };
+  };
 
-  // Walk the samples, keeping the running TWD average up to each moment, and
-  // rebuild the plotted series. (Axes are the same regardless of reference, so a
-  // reference change simply flips the sign.)
-  t.series.vmg = []; t.series.up = []; t.series.fwd = [];
+  const pos0 = [P(work[0], 0), P(work[0], 1)];
+  const sep0 = { e: pos0[refIdx].e - pos0[othIdx].e, n: pos0[refIdx].n - pos0[othIdx].n };
+  const mid0 = { e: (pos0[0].e + pos0[1].e) / 2, n: (pos0[0].n + pos0[1].n) / 2 };
   let sSin = 0, sCos = 0;
   const addTwd = (s) => { for (const b of s.p) if (b.twd != null) { const r = b.twd * Math.PI / 180; sSin += Math.sin(r); sCos += Math.cos(r); } };
-  addTwd(t.samples[0]);
+  addTwd(work[0]);
+  const twd0 = (sSin === 0 && sCos === 0) ? null : (Math.atan2(sSin, sCos) * 180 / Math.PI + 360) % 360;
+  const ax0 = primaryAxis(mid0.e, mid0.n, twd0);
+  const adv0 = ax0 ? sep0.e * ax0.x + sep0.n * ax0.y : 0;
+
   let cur = null;
-  for (let k = 1; k < t.samples.length; k++) {
-    addTwd(t.samples[k]);
+  for (let k = 1; k < work.length; k++) {
+    addTwd(work[k]);
     const twdK = (sSin === 0 && sCos === 0) ? null : (Math.atan2(sSin, sCos) * 180 / Math.PI + 360) % 360;
-    const g = gainsAt(t, refIdx, othIdx, twdK, k);
-    const x = (t.samples[k].t - t.samples[0].t) / 1000;
-    if (g.vmg != null) t.series.vmg.push({ x, y: g.vmg });
-    if (g.up != null) t.series.up.push({ x, y: g.up });
-    if (g.fwd != null) t.series.fwd.push({ x, y: g.fwd });
-    cur = g;
+    res.twdOverall = twdK;
+    const posk = [P(work[k], 0), P(work[k], 1)];
+    const sepk = { e: posk[refIdx].e - posk[othIdx].e, n: posk[refIdx].n - posk[othIdx].n };
+    const midk = { e: (posk[0].e + posk[1].e) / 2, n: (posk[0].n + posk[1].n) / 2 };
+
+    const axk = primaryAxis(midk.e, midk.n, twdK);
+    let primary = null;
+    if (axk) primary = (sepk.e * axk.x + sepk.n * axk.y) - adv0;
+
+    let fwd = null, up = null;
+    const aE = midk.e - mid0.e, aN = midk.n - mid0.n, al = Math.hypot(aE, aN);
+    if (al >= 1) {
+      const ux = aE / al, uy = aN / al;
+      let px = -uy, py = ux;
+      const orient = axk || (twdK != null ? { x: Math.sin(twdK * Math.PI / 180), y: Math.cos(twdK * Math.PI / 180) } : null);
+      if (orient && (px * orient.x + py * orient.y) < 0) { px = -px; py = -py; }
+      const dE = sepk.e - sep0.e, dN = sepk.n - sep0.n;
+      fwd = dE * ux + dN * uy; up = dE * px + dN * py;
+    }
+    const x = (work[k].t - work[0].t) / 1000;
+    if (primary != null) res.series.primary.push({ x, y: primary });
+    if (up != null) res.series.up.push({ x, y: up });
+    if (fwd != null) res.series.fwd.push({ x, y: fwd });
+    cur = { primary, up, fwd, t: work[k].t };
+  }
+  res.cur = cur;
+  return res;
+}
+
+function renderTest() {
+  const t = state.test; if (!t) return;
+  const g = computeGains(t);
+  const ref = t.boats[g.refIdx], other = t.boats[g.othIdx];
+  const primaryLabel = t.type === 'VMG' ? 'VMG' : 'VMC';
+
+  let meta = `Ref <b style="color:${ref.color}">${ref.name}</b>`;
+  if (t.type === 'VMG') meta += ` · TWD used ${g.twdOverall == null ? '—' : String(Math.round(g.twdOverall)).padStart(3, '0') + '°'}`;
+  else if (t.wp) meta += ` · WP ${String(Math.round(t.wp.brg)).padStart(3, '0')}° / ${(t.wp.rngM / NM_TO_M).toFixed(1)} nm`;
+  $('test-meta').innerHTML = meta;
+
+  const blank = (k) => setDelta(k, 0, '', '', 0, true);
+  if (!g.cur) { ['dvmg', 'rate', 'dfwd', 'dup'].forEach(blank); t.result = null; }
+  else {
+    const cur = g.cur;
+    const mins = (cur.t - effectiveSamples(t)[0].t) / 60000;
+    if (cur.primary != null) {
+      setDelta('dvmg', cur.primary, 'm', `${primaryLabel} gain, Δ`);
+      setDelta('rate', mins > 0 ? cur.primary / mins : 0, 'm/min', `${primaryLabel} gain ÷ min`, 1);
+    } else { blank('dvmg'); blank('rate'); }
+    if (cur.fwd != null) setDelta('dfwd', cur.fwd, 'm', 'along average path'); else blank('dfwd');
+    if (cur.up != null) setDelta('dup', cur.up, 'm', 'perp of avg path'); else blank('dup');
+
+    // snapshot for the history row
+    const winner = (cur.primary == null || Math.abs(cur.primary) < 0.05) ? '—' : (cur.primary > 0 ? ref.name : other.name);
+    t.result = {
+      type: t.type, startTs: t.startTs,
+      durationSec: Math.round((cur.t - effectiveSamples(t)[0].t) / 1000),
+      winner, primaryLabel,
+      rate: (cur.primary != null && mins > 0) ? cur.primary / mins : null,
+      fwd: cur.fwd, up: cur.up,
+    };
   }
 
-  if (cur) {
-    const elapsedMin = (Date.now() - t.startTs) / 60000;
-    if (cur.vmg != null) {
-      setDelta('dvmg', cur.vmg, 'm', 'sep. on TWD axis, Δ');
-      setDelta('rate', elapsedMin > 0 ? cur.vmg / elapsedMin : 0, 'm/min', 'VMG gain ÷ minutes', 1);
-    } else { setDelta('dvmg', 0, '', '', 0, true); setDelta('rate', 0, '', '', 0, true); }
-    if (cur.fwd != null) setDelta('dfwd', cur.fwd, 'm', 'along average path, Δ'); else setDelta('dfwd', 0, '', '', 0, true);
-    if (cur.up != null) setDelta('dup', cur.up, 'm', 'perp. of path, windward +'); else setDelta('dup', 0, '', '', 0, true);
-  } else { dashes(); }
-
-  chartVMG.setSeries([{ label: 'VMG gain', color: '#37e0cf', points: t.series.vmg }],
-    { xMax: t.durationSec, includeZero: true });
-  chartUP.setSeries([
-    { label: 'UP/DOWN', color: '#37e0cf', points: t.series.up },
-    { label: 'FWD/BACK', color: '#ff8a5b', points: t.series.fwd },
+  if (chartVMG) chartVMG.setSeries([{ label: `${primaryLabel} gain`, color: '#37e0cf', points: g.series.primary }], { xMax: t.durationSec, includeZero: true });
+  if (chartUP) chartUP.setSeries([
+    { label: 'UP/DOWN', color: '#37e0cf', points: g.series.up },
+    { label: 'FWD/BACK', color: '#ff8a5b', points: g.series.fwd },
   ], { xMax: t.durationSec, includeZero: true });
 }
 
@@ -571,14 +644,69 @@ function finishTest(label) {
   clearInterval(t.timer); t.running = false;
   $('test-status').textContent = label;
   $('test-stop').hidden = true;
-  $('test-close').hidden = false;
+  $('test-review').hidden = false;
+  $('trim-sec').value = '0';
+  renderTest();
+}
+function applyTrim() {
+  const t = state.test; if (!t) return;
+  t.trimSec = Math.max(0, parseInt($('trim-sec').value, 10) || 0);
+  $('test-status').textContent = t.trimSec > 0 ? `Trimmed −${t.trimSec}s` : 'Stopped';
+  renderTest();
+}
+function saveTest() {
+  const t = state.test; if (!t) return;
+  renderTest();
+  if (t.result) { history.unshift(t.result); saveHistory(); renderHistory(); }
+  closeTest();
 }
 function closeTest() {
+  if (state.test) clearInterval(state.test.timer);
   state.test = null;
   $('test-view').hidden = true;
+  $('test-review').hidden = true;
   $('ref-switch').innerHTML = '';
   $('test-meta').innerHTML = '';
   gateControls();
+}
+
+/* ---------- test history ---------- */
+const HISTORY_KEY = 'boat-receiver:history:v1';
+let history = [];
+function loadHistory() { try { const r = localStorage.getItem(HISTORY_KEY); if (r) history = JSON.parse(r); } catch (_) { history = []; } }
+function saveHistory() { try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 200))); } catch (_) {} }
+function fmtClock(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+function num(v, dp) { return (v == null || Number.isNaN(v)) ? '—' : (v >= 0 ? '+' : '−') + Math.abs(+v.toFixed(dp)); }
+function renderHistory() {
+  const body = $('history-body'); if (!body) return;
+  body.innerHTML = '';
+  $('history').hidden = history.length === 0;
+  for (const r of history) {
+    const tr = document.createElement('tr');
+    const cells = [
+      fmtClock(r.startTs), r.type, mmss(r.durationSec), r.winner,
+      r.rate == null ? '—' : `${num(r.rate, 1)} m/min`,
+      num(r.fwd, 0), num(r.up, 0),
+    ];
+    for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
+    body.appendChild(tr);
+  }
+}
+function exportCSV() {
+  const head = ['Start', 'Type', 'Duration', 'Winner', 'Gain rate (m/min)', 'FWD/BACK (m)', 'UP/DOWN (m)'];
+  const rows = history.map((r) => [
+    new Date(r.startTs).toISOString(), r.type, mmss(r.durationSec), r.winner,
+    r.rate == null ? '' : r.rate.toFixed(1),
+    r.fwd == null ? '' : r.fwd.toFixed(0),
+    r.up == null ? '' : r.up.toFixed(0),
+  ]);
+  const csv = [head, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `boat-tests-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function mmss(sec) {
@@ -590,32 +718,25 @@ function mmss(sec) {
 $('role-master').addEventListener('click', () => { setRole('master'); $('role-modal').hidden = true; });
 $('role-viewer').addEventListener('click', () => { setRole('viewer'); $('role-modal').hidden = true; });
 
-$('btn-vmg').addEventListener('click', () => { if (state.role === 'master') openDuration('VMG'); });
-$('btn-vmc').addEventListener('click', () => notYet('VMC'));
-$('btn-twa').addEventListener('click', () => notYet('TWA'));
-function notYet(type) {
-  if (state.role !== 'master') return;
-  $('test-title').textContent = `${type} test`;
-  $('test-status').textContent = 'Not built yet';
-  $('test-duration').textContent = '—';
-  $('test-elapsed').textContent = '—';
-  $('ref-switch').innerHTML = '';
-  $('test-meta').innerHTML = '';
-  $('test-tiles').innerHTML = `<div class="tile"><span class="tile__label">${type} test</span><span class="tile__value" style="font-size:15px">Coming next</span><span class="tile__sub">Send the spec (VMC needs a target bearing/mark) and this fills in.</span></div>`;
-  $('test-progress').style.width = '0%';
-  $('test-stop').hidden = true;
-  $('test-close').hidden = false;
-  $('test-view').hidden = false;
-  state.test = null;
-}
+$('btn-vmg').addEventListener('click', () => { if (state.role === 'master') openSetup('VMG'); });
+$('btn-vmc').addEventListener('click', () => { if (state.role === 'master') openSetup('VMC'); });
+$('btn-twa').addEventListener('click', () => { if (state.role === 'master') openSetup('TWA'); });
 
 $('test-stop').addEventListener('click', () => finishTest('Stopped'));
-$('test-close').addEventListener('click', closeTest);
+$('trim-apply').addEventListener('click', applyTrim);
+$('test-discard').addEventListener('click', closeTest);
+$('test-save').addEventListener('click', saveTest);
+$('export-csv').addEventListener('click', exportCSV);
 
 $('duration-start').addEventListener('click', () => {
   const mins = Math.max(1, parseInt($('duration-input').value, 10) || 5);
   $('duration-modal').hidden = true;
-  if (pendingTest === 'VMG') startVMG(mins * 60);
+  let rng = null, brg = null;
+  if (pendingTest !== 'VMG') {
+    rng = parseFloat($('wp-rng').value) || (pendingTest === 'VMC' ? 20 : 2);
+    brg = ((parseFloat($('wp-brg').value) || 0) % 360 + 360) % 360;
+  }
+  startTest(pendingTest, mins * 60, rng, brg);
 });
 $('duration-cancel').addEventListener('click', () => { $('duration-modal').hidden = true; });
 
@@ -649,6 +770,8 @@ document.querySelector('.streams-wrap').addEventListener('toggle', (e) => {
 
 /* ---------- init ---------- */
 applyBoats(loadBoats());
+loadHistory();
+renderHistory();
 const savedRole = loadRole();
 if (savedRole) { setRole(savedRole); $('role-modal').hidden = true; }
 else { $('role-modal').hidden = false; }
