@@ -28,10 +28,6 @@
   <section class="connbar" id="connbar"></section>
 
   <main class="main">
-    <div class="ready" id="ready-state">
-      <p id="ready-text">Select a test to begin.</p>
-    </div>
-
     <section class="testview" id="test-view" hidden>
       <div class="testview__head">
         <div>
@@ -40,8 +36,10 @@
             <span id="test-elapsed">0:00</span> / <span id="test-duration">5:00</span>
             <span class="testview__status" id="test-status"></span>
           </div>
+          <div class="testview__meta" id="test-meta"></div>
         </div>
         <div class="testview__controls">
+          <div class="ref-switch" id="ref-switch"></div>
           <button class="danger-btn" id="test-stop" type="button">Stop</button>
           <button class="ghost-btn" id="test-close" type="button" hidden>Close</button>
         </div>
@@ -52,14 +50,43 @@
 
       <div class="charts">
         <figure class="chart">
-          <figcaption>VMG — knots</figcaption>
+          <figcaption>VMG gain — metres</figcaption>
           <canvas id="chart-vmg"></canvas>
         </figure>
         <figure class="chart">
-          <figcaption>Made good to windward — metres</figcaption>
+          <figcaption>UP/DOWN &amp; FWD/BACK gain — metres</figcaption>
           <canvas id="chart-up"></canvas>
         </figure>
       </div>
+    </section>
+
+    <section class="dashboard" id="dashboard">
+      <div class="rb" id="rb">
+        <div class="rb__item">
+          <span class="rb__label">Range</span>
+          <span class="rb__value" id="rb-range">—</span>
+        </div>
+        <div class="rb__item">
+          <span class="rb__label">Bearing</span>
+          <span class="rb__value" id="rb-bearing">—</span>
+        </div>
+        <div class="rb__note" id="rb-note">boat&nbsp;1 → boat&nbsp;2</div>
+      </div>
+
+      <figure class="map">
+        <figcaption>Tracks</figcaption>
+        <canvas id="map"></canvas>
+      </figure>
+
+      <section class="strips" id="strips">
+        <figure class="strip"><figcaption>BS <span class="strip__unit">kn</span><span class="strip__vals" id="val-bs"></span></figcaption><canvas id="strip-bs"></canvas></figure>
+        <figure class="strip"><figcaption>COG <span class="strip__unit">°</span><span class="strip__vals" id="val-cog"></span></figcaption><canvas id="strip-cog"></canvas></figure>
+        <figure class="strip"><figcaption>TWA <span class="strip__unit">°</span><span class="strip__vals" id="val-twa"></span></figcaption><canvas id="strip-twa"></canvas></figure>
+        <figure class="strip"><figcaption>HEEL <span class="strip__unit">°</span><span class="strip__vals" id="val-heel"></span></figcaption><canvas id="strip-heel"></canvas></figure>
+        <figure class="strip"><figcaption>RUDDER <span class="strip__unit">°</span><span class="strip__vals" id="val-rudder"></span></figcaption><canvas id="strip-rudder"></canvas></figure>
+        <figure class="strip"><figcaption>TWD <span class="strip__unit">°</span><span class="strip__vals" id="val-twd"></span></figcaption><canvas id="strip-twd"></canvas></figure>
+        <figure class="strip"><figcaption>TWS <span class="strip__unit">kn</span><span class="strip__vals" id="val-tws"></span></figcaption><canvas id="strip-tws"></canvas></figure>
+      </section>
     </section>
 
     <details class="streams-wrap">
@@ -160,6 +187,7 @@
   <script src="config.js"></script>
   <script src="sailmath.js"></script>
   <script src="charts.js"></script>
+  <script src="trackmap.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

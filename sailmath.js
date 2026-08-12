@@ -35,5 +35,19 @@
     return speedKn * KN_TO_MS * dtSec;
   }
 
-  return { KN_TO_MS, norm180, twa, vmg, vmc, dist };
+  // Great-circle range (m) and initial bearing (deg, 0-360) from point 1 to 2.
+  function rangeBearing(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const p1 = lat1 * D2R, p2 = lat2 * D2R;
+    const dp = (lat2 - lat1) * D2R, dl = (lon2 - lon1) * D2R;
+    const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+    const rangeM = 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+    const y = Math.sin(dl) * Math.cos(p2);
+    const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+    let bearingDeg = Math.atan2(y, x) / D2R;
+    bearingDeg = (bearingDeg + 360) % 360;
+    return { rangeM, bearingDeg };
+  }
+
+  return { KN_TO_MS, norm180, twa, vmg, vmc, dist, rangeBearing };
 });
