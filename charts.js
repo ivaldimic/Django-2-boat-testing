@@ -136,4 +136,87 @@
   }
 
   root.LineChart = LineChart;
+
+  /* Scrolling strip chart: fixed time window, newest at the right, one line per
+   * boat. Handles angular channels (COG/TWD) by breaking the line across wraps. */
+  class StripChart {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.ctx = canvas.getContext('2d');
+      this.series = [];
+      this.opts = {};
+      this._onResize = () => { this._resize(); this.draw(); };
+      window.addEventListener('resize', this._onResize);
+      this._resize();
+    }
+    destroy() { window.removeEventListener('resize', this._onResize); }
+    _resize() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = this.canvas.getBoundingClientRect();
+      const w = Math.max(1, Math.floor(rect.width || this.canvas.clientWidth || 300));
+      const h = Math.max(1, Math.floor(rect.height || this.canvas.clientHeight || 90));
+      this.canvas.width = Math.floor(w * dpr);
+      this.canvas.height = Math.floor(h * dpr);
+      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.W = w; this.H = h;
+    }
+    // series: [{ color, points:[{t,y}] }]  opts: { now, windowMs, angular, unit }
+    setSeries(series, opts) { this.series = series || []; this.opts = opts || {}; this.draw(); }
+    draw() {
+      const ctx = this.ctx, W = this.W, H = this.H;
+      ctx.clearRect(0, 0, W, H);
+      const mL = 34, mR = 6, mT = 6, mB = 6;
+      const pw = W - mL - mR, ph = H - mT - mB;
+      if (pw <= 0 || ph <= 0) return;
+
+      const now = this.opts.now || Date.now();
+      const win = this.opts.windowMs || 120000;
+      const t0 = now - win;
+
+      let yMin = Infinity, yMax = -Infinity, has = false;
+      for (const s of this.series) for (const p of s.points) {
+        if (p.t < t0 || p.y == null || Number.isNaN(p.y)) continue;
+        has = true; if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y;
+      }
+      if (!has) {
+        ctx.fillStyle = '#4d6a80'; ctx.font = '11px system-ui, sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText('no data', mL, H / 2);
+        return;
+      }
+      if (yMin === yMax) { yMin -= 1; yMax += 1; }
+      const padY = (yMax - yMin) * 0.15; yMin -= padY; yMax += padY;
+
+      const xToPx = (t) => mL + ((t - t0) / win) * pw;
+      const yToPx = (y) => mT + ph - ((y - yMin) / (yMax - yMin)) * ph;
+
+      // y labels (min/max)
+      ctx.font = '10px ui-monospace, Menlo, monospace';
+      ctx.fillStyle = '#4d6a80'; ctx.textAlign = 'right';
+      ctx.textBaseline = 'top'; ctx.fillText(yMax.toFixed(0), mL - 4, mT);
+      ctx.textBaseline = 'bottom'; ctx.fillText(yMin.toFixed(0), mL - 4, H - mB);
+
+      // baseline grid
+      ctx.strokeStyle = 'rgba(120,170,200,0.10)';
+      ctx.beginPath(); ctx.moveTo(mL, mT + ph / 2); ctx.lineTo(W - mR, mT + ph / 2); ctx.stroke();
+
+      const angular = this.opts.angular;
+      ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
+      for (const s of this.series) {
+        const pts = s.points.filter((p) => p.t >= t0 && p.y != null && !Number.isNaN(p.y));
+        if (!pts.length) continue;
+        ctx.strokeStyle = s.color; ctx.beginPath();
+        let prev = null;
+        for (const p of pts) {
+          const px = xToPx(p.t), py = yToPx(p.y);
+          const brk = prev && (angular && Math.abs(p.y - prev.y) > 180 || (p.t - prev.t) > win / 4);
+          if (!prev || brk) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          prev = p;
+        }
+        ctx.stroke();
+      }
+    }
+  }
+
+  root.StripChart = StripChart;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

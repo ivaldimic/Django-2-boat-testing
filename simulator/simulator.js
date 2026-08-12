@@ -68,9 +68,14 @@ function wrap360(x) { return ((x % 360) + 360) % 360; }
 function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
 
 // ---- Boat state + servers -------------------------------------------------
-const boats = config.boats.map((b) => ({
+const boats = config.boats.map((b, i) => ({
   ...b,
   cog: b.cog, hdg: b.hdg, sog: b.sog,
+  heelBase: b.heel != null ? b.heel : 22 + i * 2,   // deg
+  heel: b.heel != null ? b.heel : 22 + i * 2,
+  rudder: 0,
+  phase: Math.random() * Math.PI * 2,               // for gentle oscillations
+  t: 0,
   wss: new WebSocketServer({ port: b.port }),
 }));
 
@@ -84,10 +89,16 @@ boats.forEach((b) => {
 
 // ---- Simulation loop ------------------------------------------------------
 function step(b) {
+  b.t += dtSec;
   // Gentle random walk so the plots have life, kept near the configured values.
   b.cog = wrap360(b.cog + (Math.random() - 0.5) * 1.2);
   b.sog = clamp(b.sog + (Math.random() - 0.5) * 0.08, 0.5, 20);
   b.hdg = wrap360(b.cog - 2 + (Math.random() - 0.5) * 0.6); // small leeway vs course
+
+  // Heel: base + slow swell + puffs, correlated loosely with speed.
+  b.heel = b.heelBase + 2.2 * Math.sin(b.t * 0.25 + b.phase) + (Math.random() - 0.5) * 1.2;
+  // Rudder: small helming oscillation around a touch of weather helm.
+  b.rudder = 2.0 * Math.sin(b.t * 0.6 + b.phase) + (Math.random() - 0.5) * 1.6;
 
   // Advance position along COG.
   const distM = b.sog * 1852 / 3600 * dtSec; // knots -> m over dt
@@ -111,8 +122,14 @@ function emit(b) {
   const hdt = sentence(`HEHDT,${b.hdg.toFixed(1)},T`);
   const twsMs = (tws * 0.514444).toFixed(1);
   const mwd = sentence(`WIMWD,${twd.toFixed(1)},T,${twd.toFixed(1)},M,${tws.toFixed(1)},N,${twsMs},M`);
+  // Boat speed through water (~ SOG here, small offset), knots in the N field.
+  const bs = Math.max(0, b.sog - 0.1);
+  const vhw = sentence(`VWVHW,,T,,M,${bs.toFixed(1)},N,${(bs * 1.852).toFixed(1)},K`);
+  // Heel via XDR ROLL (degrees), rudder via RSA (degrees).
+  const xdr = sentence(`IIXDR,A,${b.heel.toFixed(1)},D,ROLL`);
+  const rsa = sentence(`IIRSA,${b.rudder.toFixed(1)},A,,`);
 
-  const payload = `${rmc}\r\n${hdt}\r\n${mwd}\r\n`;
+  const payload = `${rmc}\r\n${hdt}\r\n${mwd}\r\n${vhw}\r\n${xdr}\r\n${rsa}\r\n`;
   for (const ws of b.wss.clients) {
     if (ws.readyState === 1) ws.send(payload);
   }
