@@ -1,0 +1,5 @@
+{
+  "udpPort": 5555,
+  "port": 8080,
+  "serveWebApp": true
+}

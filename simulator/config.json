@@ -1,0 +1,8 @@
+{
+  "updateHz": 2,
+  "wind": { "tws": 12.0, "twd": 0 },
+  "boats": [
+    { "port": 8090, "name": "Boat 1", "lat": 43.4325, "lon": 13.7542, "cog": 42, "hdg": 40, "sog": 6.6 },
+    { "port": 8091, "name": "Boat 2", "lat": 43.4327, "lon": 13.7545, "cog": 46, "hdg": 44, "sog": 6.4 }
+  ]
+}
