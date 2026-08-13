@@ -41,8 +41,21 @@ open the app and both boats go **Live**.
 The defaults put both boats on a starboard beat: Boat 1 lower and faster, Boat 2
 higher and slower, so they diverge and Boat 1 makes slightly better VMG — a
 normal two-boat line-up. A gentle random walk keeps the numbers alive so the
-plots move. Each boat sends `RMC` (position, SOG, COG), `HDT` (heading), and
-`MWD` (TWD, TWS) with valid checksums.
+plots move. Each boat sends `RMC` (position, SOG, COG), `HDT` (heading), `MWD`
+(TWD, TWS), `VHW` (boat speed), `XDR`/`ROLL` (heel), `RSA` (rudder) and `MWV`/`R`
+(apparent wind AWA/AWS) with valid checksums.
+
+## Control panel
+
+While it runs, open **http://localhost:8099** (port set by `controlPort` in
+`config.json`) for a small control page where you can:
+
+- **Start / Stop / Restart** the boats (Restart returns them to their initial
+  positions and headings),
+- **change each boat's heading** (it holds the new course, so TWA and AWA update),
+- **change the wind** (TWD / TWS).
+
+Changing heading or wind updates the apparent and true wind angles the app sees.
 
 ## Emit downwind / other angles
 

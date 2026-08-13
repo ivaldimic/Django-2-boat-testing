@@ -29,7 +29,8 @@ Deploy:   app  ⇄  bridge on each boat (ws://boat-pc:8080)  ⇄  Expedition (UD
 
 It installs dependencies on first run, starts the simulator (two boats) and the
 bridge (which serves the app over http), then opens the app in your browser at
-`http://localhost:8080`. Both boats should read **Live**. Press **Ctrl+C** in that
+`http://localhost:8080`. Both boats should read **Live**. A simulator **control panel** (start/stop/restart,
+change heading & wind) is at **http://localhost:8099**. Press **Ctrl+C** in that
 window to stop everything.
 
 > First time on macOS: if double-clicking is blocked because the file was
@@ -73,18 +74,29 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
        (windward positive).
      - **FWD/BACK gain** and **UP/DOWN gain** = each distance now minus its value
        at the start.
+     - **Upwind vs downwind** — the VMG axis points toward the wind upwind and
+       *away* from the wind downwind (detected from the boats' overall track). So
+       downwind the winner is the boat sailing more away from the wind, and the
+       sign flips accordingly. The header shows `upwind`/`downwind`.
      - Two plots show VMG gain and the UP/DOWN & FWD/BACK gains over the run.
-   - **VMC test** and **TWA test** — same maths, but the primary axis is the
-     **bearing to a waypoint** instead of the TWD. Pressing the button asks for the
-     waypoint **range and bearing** (prefilled with the reference boat's current
-     heading and **20 nm** for VMC, **2 nm** for TWA); the waypoint is dropped at
-     that range/bearing from the boats' start midpoint. **VMC gain** = the boat
-     separation projected on the bearing to the waypoint, now minus at the start.
-     A distant (VMC) waypoint gives an almost fixed bearing; a close (TWA) one
-     shifts as you approach. FWD/BACK and UP/DOWN are the same as in the VMG test.
+   - **VMC test** — creates **one waypoint** at the range/bearing you enter, from
+     the **master (reference) boat's** start position (the *VMC waypoint*). The
+     button prefills the reference boat's current heading and **20 nm**. **VMC
+     gain** = the boat separation projected on the bearing to that waypoint, now
+     minus at the start. **UP/DOWN** = the change in the *absolute* separation
+     projected on the perpendicular of that bearing (grows → positive). No
+     FWD/BACK for VMC.
+   - **TWA test** — creates **two waypoints**, one per boat, each at the same
+     range/bearing from **that boat's own** start position (*Target WP Master* and
+     *Target WP Slave*). Prefills current heading and **2 nm**. **TWA gain** = how
+     much closer the reference boat is to its waypoint than the other is to
+     theirs (other's distance − reference's distance), now minus at the start.
+     **UP/DOWN** as in VMC.
    - **Stop, then review** — stopping a test lets you **trim** the last N seconds
      (e.g. if the boats bore away at the end) and recompute, then **Save** it to
      the history or **Discard** it.
+   - The three test buttons are colour-outlined (VMG teal, VMC orange, TWA
+     purple); in the viewer role they're visible but disabled.
 4. **Live dashboard** (always on the main page, for master and viewers alike):
    - **Range & bearing** between the two boats, in metres and degrees true
      (boat 1 → boat 2), updated continuously.
@@ -93,13 +105,17 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
      scale bar. It auto-zooms to keep both boats in view. It's offline (no map
      tiles); if you later want a geographic basemap where there's signal, that can
      be added.
-   - **Strip charts** — the last 2 minutes of **BS, COG, TWA, HEEL, RUDDER, TWD,
-     TWS**, one trace per boat, with each boat's current value **and its average
-     since the test started** (`x̄`) in the header. TWA is derived from COG and TWD.
-     Wrapping channels (COG/TWD) break cleanly at 360/0 instead of a false spike.
-5. **Test history** — at the bottom of the page, one row per saved test: start
-   time, type (VMG/VMC/TWA), duration, winner, gain rate, FWD/BACK and UP/DOWN
-   metres. **Export CSV** downloads the table. History is stored on the device.
+   - **Strip charts** — one trace per boat, with each boat's current value in the
+     header and its **average since the test started** in a box beside the chart.
+     Add or remove strips with **+ Add** / the **×** on each, choosing from the
+     variables in the feed (SOG, BS, COG, HDG, TWA, AWA, TWD, TWS, AWS, HEEL,
+     RUDDER, PITCH). The **time window** (1 / 5 / 10 / 20 min) is selectable at the
+     top. Your choice of strips and window is saved on the device.
+5. **Test history** — at the bottom of the page, one row per saved test: date &
+   time, type (VMG/VMC/TWA), duration, winner, gain rate, FWD/BACK, UP/DOWN, and
+   the whole-test averages of **BS, TWS, TWD, HDG, COG, SOG, HEEL, RUDDER** shown
+   as boat 1 / boat 2. **Export CSV** downloads everything (each average as a
+   separate per-boat column); **Clear** empties the history. Stored on the device.
 
 The simulator now also sends boat speed (`VHW`), heel (`XDR/ROLL`) and rudder
 (`RSA`) so all six strips have data on the desk. On a real boat these come from

@@ -83,30 +83,38 @@
         <canvas id="map"></canvas>
       </figure>
 
-      <section class="strips" id="strips">
-        <figure class="strip"><figcaption>BS <span class="strip__unit">kn</span><span class="strip__vals" id="val-bs"></span></figcaption><div class="strip__body"><canvas id="strip-bs"></canvas><div class="strip__avgbox" id="avg-bs"></div></div></figure>
-        <figure class="strip"><figcaption>COG <span class="strip__unit">°</span><span class="strip__vals" id="val-cog"></span></figcaption><div class="strip__body"><canvas id="strip-cog"></canvas><div class="strip__avgbox" id="avg-cog"></div></div></figure>
-        <figure class="strip"><figcaption>TWA <span class="strip__unit">°</span><span class="strip__vals" id="val-twa"></span></figcaption><div class="strip__body"><canvas id="strip-twa"></canvas><div class="strip__avgbox" id="avg-twa"></div></div></figure>
-        <figure class="strip"><figcaption>HEEL <span class="strip__unit">°</span><span class="strip__vals" id="val-heel"></span></figcaption><div class="strip__body"><canvas id="strip-heel"></canvas><div class="strip__avgbox" id="avg-heel"></div></div></figure>
-        <figure class="strip"><figcaption>RUDDER <span class="strip__unit">°</span><span class="strip__vals" id="val-rudder"></span></figcaption><div class="strip__body"><canvas id="strip-rudder"></canvas><div class="strip__avgbox" id="avg-rudder"></div></div></figure>
-        <figure class="strip"><figcaption>TWD <span class="strip__unit">°</span><span class="strip__vals" id="val-twd"></span></figcaption><div class="strip__body"><canvas id="strip-twd"></canvas><div class="strip__avgbox" id="avg-twd"></div></div></figure>
-        <figure class="strip"><figcaption>TWS <span class="strip__unit">kn</span><span class="strip__vals" id="val-tws"></span></figcaption><div class="strip__body"><canvas id="strip-tws"></canvas><div class="strip__avgbox" id="avg-tws"></div></div></figure>
+      <section class="strips-wrap">
+        <div class="strips__head">
+          <span class="strips__title">Strip charts</span>
+          <div class="tf" id="tf">
+            <button type="button" data-min="1">1m</button>
+            <button type="button" data-min="5">5m</button>
+            <button type="button" data-min="10">10m</button>
+            <button type="button" data-min="20">20m</button>
+          </div>
+          <button class="ghost-btn" id="add-strip" type="button">+ Add</button>
+        </div>
+        <section class="strips" id="strips"></section>
       </section>
     </section>
 
     <section class="history" id="history" hidden>
       <div class="history__head">
         <h2>Test history</h2>
-        <button class="ghost-btn" id="export-csv" type="button">Export CSV</button>
+        <div class="history__actions">
+          <button class="ghost-btn" id="export-csv" type="button">Export CSV</button>
+          <button class="ghost-btn" id="clear-history" type="button">Clear</button>
+        </div>
       </div>
       <div class="history__scroll">
         <table class="history__table">
           <thead>
-            <tr><th>Start</th><th>Type</th><th>Duration</th><th>Winner</th><th>Gain rate</th><th>FWD/BACK</th><th>UP/DOWN</th></tr>
+            <tr><th>Date</th><th>Type</th><th>Duration</th><th>Winner</th><th>Gain rate</th><th>FWD/BACK</th><th>UP/DOWN</th><th>BS</th><th>TWS</th><th>TWD</th><th>HDG</th><th>COG</th><th>SOG</th><th>HEEL</th><th>RUD</th></tr>
           </thead>
           <tbody id="history-body"></tbody>
         </table>
       </div>
+      <p class="history__note">Average columns show boat 1 / boat 2 over the whole test.</p>
     </section>
 
     <details class="streams-wrap">
@@ -145,6 +153,18 @@
       <div class="modal__actions">
         <button class="ghost-btn" id="duration-cancel" type="button">Cancel</button>
         <button class="primary-btn" id="duration-start" type="button">Start</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add-strip picker -->
+  <div class="modal" id="strip-modal" hidden>
+    <div class="modal__box">
+      <h2>Add strip chart</h2>
+      <p class="modal__hint">Pick a variable from the boat data stream.</p>
+      <div class="chan-list" id="chan-list"></div>
+      <div class="modal__actions">
+        <button class="ghost-btn" id="strip-cancel" type="button">Cancel</button>
       </div>
     </div>
   </div>

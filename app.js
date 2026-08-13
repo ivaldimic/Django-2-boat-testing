@@ -10,8 +10,8 @@ const MAX_LINES = 120;
 const LIVE_MS = 3000;
 const RECONNECT_MAX_MS = 8000;
 const COLORS = ['#37e0cf', '#ff8a5b', '#c084fc', '#7dd3fc'];
-const STRIP_WINDOW_MS = 120000;   // strip charts show the last 2 minutes
-const HIST_MS = 130000;           // keep a touch more history than shown
+const STRIP_WINDOW_MS = 120000;   // default strip window (2 minutes)
+const HIST_MS = 1210000;          // keep ~20 min so the 20-minute window works
 const TRACK_MS = 600000;          // keep up to 10 minutes of track
 const SAMPLE_MS = 500;            // history sample + dashboard redraw cadence
 
@@ -143,7 +143,10 @@ function parseNMEA(raw, live) {
     case 'VTG': if (f[1]) live.cog = +f[1]; if (f[5]) live.sog = +f[5]; break;
     case 'HDT': case 'HDG': if (f[1]) live.hdg = +f[1]; break;
     case 'VHW': if (f[5]) live.bsp = +f[5]; break;
-    case 'MWV': if (f[2] === 'T') { if (f[1]) live.twa = +f[1]; if (f[3]) live.tws = +f[3]; } break;
+    case 'MWV':
+      if (f[2] === 'T') { if (f[1]) live.twa = S.norm180(+f[1]); if (f[3]) live.tws = +f[3]; }
+      else if (f[2] === 'R') { if (f[1]) live.awa = S.norm180(+f[1]); if (f[3]) live.aws = +f[3]; }
+      break;
     case 'MWD': if (f[1]) live.twd = +f[1]; if (f[5]) live.tws = +f[5]; break;
     case 'RSA': if (f[1] !== '' && f[1] != null) live.rudder = +f[1]; break;
     case 'XDR': parseXDR(f, live); break;
@@ -197,45 +200,82 @@ setInterval(() => {
 }, SAMPLE_MS);
 
 /* ---------- live dashboard (map + strips + range/bearing) ---------- */
-const CHANNELS = [
-  { key: 'bsp', id: 'bs', angular: false, dp: 1 },
-  { key: 'cog', id: 'cog', angular: true, dp: 0 },
-  { key: 'twa', id: 'twa', angular: false, dp: 0 },
-  { key: 'heel', id: 'heel', angular: false, dp: 1 },
-  { key: 'rudder', id: 'rudder', angular: false, dp: 1 },
-  { key: 'twd', id: 'twd', angular: true, dp: 0 },
-  { key: 'tws', id: 'tws', angular: false, dp: 1 },
+const ALL_CHANNELS = [
+  { key: 'sog', id: 'sog', label: 'SOG', unit: 'kn', angular: false, dp: 1 },
+  { key: 'bsp', id: 'bs', label: 'BS', unit: 'kn', angular: false, dp: 1 },
+  { key: 'cog', id: 'cog', label: 'COG', unit: '°', angular: true, dp: 0 },
+  { key: 'hdg', id: 'hdg', label: 'HDG', unit: '°', angular: true, dp: 0 },
+  { key: 'twa', id: 'twa', label: 'TWA', unit: '°', angular: false, dp: 0 },
+  { key: 'awa', id: 'awa', label: 'AWA', unit: '°', angular: false, dp: 0 },
+  { key: 'twd', id: 'twd', label: 'TWD', unit: '°', angular: true, dp: 0 },
+  { key: 'tws', id: 'tws', label: 'TWS', unit: 'kn', angular: false, dp: 1 },
+  { key: 'aws', id: 'aws', label: 'AWS', unit: 'kn', angular: false, dp: 1 },
+  { key: 'heel', id: 'heel', label: 'HEEL', unit: '°', angular: false, dp: 1 },
+  { key: 'rudder', id: 'rudder', label: 'RUDDER', unit: '°', angular: false, dp: 1 },
+  { key: 'pitch', id: 'pitch', label: 'PITCH', unit: '°', angular: false, dp: 1 },
 ];
+const chById = (id) => ALL_CHANNELS.find((c) => c.id === id);
+const DEFAULT_STRIPS = ['bs', 'cog', 'twa', 'heel', 'rudder', 'twd', 'tws'];
+const STRIPS_KEY = 'boat-receiver:strips:v1';
+const TF_KEY = 'boat-receiver:stripwin:v1';
+function loadStrips() { try { const r = localStorage.getItem(STRIPS_KEY); if (r) return JSON.parse(r); } catch (_) {} return DEFAULT_STRIPS.slice(); }
+function saveStrips() { try { localStorage.setItem(STRIPS_KEY, JSON.stringify(state.strips)); } catch (_) {} }
+function loadStripWin() { try { const r = localStorage.getItem(TF_KEY); if (r) return +r; } catch (_) {} return STRIP_WINDOW_MS; }
+function saveStripWin() { try { localStorage.setItem(TF_KEY, String(state.stripWindowMs)); } catch (_) {} }
+
+state.strips = loadStrips();
+state.stripWindowMs = loadStripWin();
+
 let trackMap = null;
-const strips = {};
+const strips = {};   // id -> StripChart
+function twaVal(l) { return (l.cog != null && l.twd != null) ? S.twa(l.cog, l.twd) : l.twa; }
+
+function buildStrips() {
+  const wrap = $('strips'); if (!wrap) return;
+  for (const id of Object.keys(strips)) { try { strips[id].destroy(); } catch (_) {} delete strips[id]; }
+  wrap.innerHTML = '';
+  for (const id of state.strips) {
+    const ch = chById(id); if (!ch) continue;
+    const fig = document.createElement('figure');
+    fig.className = 'strip'; fig.dataset.id = id;
+    fig.innerHTML =
+      `<figcaption><span class="strip__name">${ch.label}</span> <span class="strip__unit">${ch.unit}</span>` +
+      `<span class="strip__vals" id="val-${id}"></span>` +
+      `<button class="strip__del" type="button" title="Remove" aria-label="Remove">&times;</button></figcaption>` +
+      `<div class="strip__body"><canvas></canvas><div class="strip__avgbox" id="avg-${id}"></div></div>`;
+    wrap.appendChild(fig);
+    fig.querySelector('.strip__del').addEventListener('click', () => {
+      state.strips = state.strips.filter((x) => x !== id); saveStrips(); buildStrips();
+    });
+    if (typeof StripChart !== 'undefined') strips[id] = new StripChart(fig.querySelector('canvas'));
+  }
+}
+
 function initDashboard() {
   if (trackMap || typeof TrackMap === 'undefined') return;
   const mapC = $('map'); if (!mapC) return;
   trackMap = new TrackMap(mapC);
-  for (const ch of CHANNELS) {
-    const c = $(`strip-${ch.id}`);
-    if (c && typeof StripChart !== 'undefined') strips[ch.id] = new StripChart(c);
-  }
+  buildStrips();
 }
 
 function sampleHistory(now) {
   for (const rt of state.rt.values()) {
     const l = rt.live;
     if (!l || !l.ts || (now - l.ts) >= LIVE_MS) continue;   // only sample fresh data
-    const twa = (l.cog != null && l.twd != null) ? S.twa(l.cog, l.twd) : l.twa;
-    rt.hist.push({ t: now, bsp: l.bsp, cog: l.cog, twa, heel: l.heel, rudder: l.rudder, twd: l.twd, tws: l.tws });
+    const snap = { t: now, twa: twaVal(l) };
+    for (const ch of ALL_CHANNELS) if (ch.key !== 'twa') snap[ch.key] = l[ch.key];
+    rt.hist.push(snap);
     const cut = now - HIST_MS;
     while (rt.hist.length && rt.hist[0].t < cut) rt.hist.shift();
 
     // running per-channel average since the test started
     if (state.test && state.test.running) {
       if (!rt.tavg) rt.tavg = {};
-      const vals = { bsp: l.bsp, cog: l.cog, twa, heel: l.heel, rudder: l.rudder, twd: l.twd, tws: l.tws };
-      for (const ch of CHANNELS) {
-        const v = vals[ch.key];
+      for (const ch of ALL_CHANNELS) {
+        const v = snap[ch.key];
         if (v == null || Number.isNaN(v)) continue;
-        const a = rt.tavg[ch.key] || (rt.tavg[ch.key] = { sum: 0, sin: 0, cos: 0, n: 0 });
-        a.n++; a.sum += v; const r = v * Math.PI / 180; a.sin += Math.sin(r); a.cos += Math.cos(r);
+        const acc = rt.tavg[ch.key] || (rt.tavg[ch.key] = { sum: 0, sin: 0, cos: 0, n: 0 });
+        acc.n++; acc.sum += v; const r = v * Math.PI / 180; acc.sin += Math.sin(r); acc.cos += Math.cos(r);
       }
     }
 
@@ -274,32 +314,63 @@ function renderDashboard(now) {
 
   trackMap.setData({ boats, range, bearing });
 
-  for (const ch of CHANNELS) {
-    if (strips[ch.id]) {
-      const series = rts.map((rt) => ({ color: rt.color, points: rt.hist.map((h) => ({ t: h.t, y: h[ch.key] })) }));
-      strips[ch.id].setSeries(series, { now, windowMs: STRIP_WINDOW_MS, angular: ch.angular });
+  const win = state.stripWindowMs;
+  const t0 = now - win;
+  for (const id of state.strips) {
+    const ch = chById(id); if (!ch) continue;
+    if (strips[id]) {
+      const series = rts.map((rt) => {
+        const pts = rt.hist.filter((h) => h.t >= t0);
+        const step = Math.max(1, Math.ceil(pts.length / 600));   // decimate for long windows
+        return { color: rt.color, points: pts.filter((_, i) => i % step === 0).map((h) => ({ t: h.t, y: h[ch.key] })) };
+      });
+      strips[id].setSeries(series, { now, windowMs: win, angular: ch.angular });
     }
-    const valEl = $(`val-${ch.id}`);
+    const valEl = $(`val-${id}`);
     if (valEl) {
       valEl.innerHTML = rts.map((rt) => {
-        let v = rt.live[ch.key];
-        if (ch.key === 'twa' && rt.live.cog != null && rt.live.twd != null) v = S.twa(rt.live.cog, rt.live.twd);
+        const v = ch.key === 'twa' ? twaVal(rt.live) : rt.live[ch.key];
         const txt = (v == null || Number.isNaN(v)) ? '—' : (+v).toFixed(ch.dp);
         return `<span style="color:${rt.color}">${txt}</span>`;
       }).join('<span class="strip__sep">·</span>');
     }
-    const avgEl = $(`avg-${ch.id}`);
+    const avgEl = $(`avg-${id}`);
     if (avgEl) {
       const rows = rts.map((rt) => {
-        const a = state.test && rt.tavg && rt.tavg[ch.key];
-        const txt = (!a || !a.n) ? '—'
-          : (ch.angular ? (Math.atan2(a.sin, a.cos) * 180 / Math.PI + 360) % 360 : a.sum / a.n).toFixed(ch.dp);
+        const acc = state.test && rt.tavg && rt.tavg[ch.key];
+        const txt = (!acc || !acc.n) ? '—'
+          : (ch.angular ? (Math.atan2(acc.sin, acc.cos) * 180 / Math.PI + 360) % 360 : acc.sum / acc.n).toFixed(ch.dp);
         return `<span class="avgrow"><span class="avgdot" style="background:${rt.color}"></span><span class="avgval" style="color:${rt.color}">${txt}</span></span>`;
       }).join('');
       avgEl.innerHTML = `<span class="avglabel">avg${state.test ? '' : ' · run a test'}</span>${rows}`;
     }
   }
 }
+
+/* strip controls: timeframe + add/remove */
+function refreshTF() {
+  for (const btn of $('tf').querySelectorAll('button')) {
+    btn.setAttribute('aria-pressed', String(+btn.dataset.min * 60000 === state.stripWindowMs));
+  }
+}
+for (const btn of $('tf').querySelectorAll('button')) {
+  btn.addEventListener('click', () => { state.stripWindowMs = +btn.dataset.min * 60000; saveStripWin(); refreshTF(); });
+}
+function openStripPicker() {
+  const list = $('chan-list'); list.innerHTML = '';
+  const avail = ALL_CHANNELS.filter((c) => !state.strips.includes(c.id));
+  if (!avail.length) { list.innerHTML = '<p class="modal__hint">All variables are already shown.</p>'; }
+  for (const c of avail) {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'chan-btn'; btn.textContent = `${c.label} (${c.unit})`;
+    btn.addEventListener('click', () => { state.strips.push(c.id); saveStrips(); buildStrips(); $('strip-modal').hidden = true; });
+    list.appendChild(btn);
+  }
+  $('strip-modal').hidden = false;
+}
+$('add-strip').addEventListener('click', openStripPicker);
+$('strip-cancel').addEventListener('click', () => { $('strip-modal').hidden = true; });
+refreshTF();
 
 /* ---------- roles ---------- */
 function setRole(role) {
@@ -451,10 +522,11 @@ function buildRefSwitch(boats) {
 const tileEls = {};
 function buildTiles(type) {
   const wrap = $('test-tiles'); wrap.innerHTML = '';
-  const primary = type === 'VMG' ? 'VMG' : 'VMC';
+  for (const k of Object.keys(tileEls)) delete tileEls[k];
+  const primary = type === 'VMG' ? 'VMG' : (type === 'VMC' ? 'VMC' : 'TWA');
   tileEls.dvmg = tile(wrap, 'delta', `${primary} gain`, 'delta');
   tileEls.rate = tile(wrap, 'delta', `${primary} gain / min`, 'delta');
-  tileEls.dfwd = tile(wrap, 'delta', 'FWD/BACK gain', 'delta');
+  if (type === 'VMG') tileEls.dfwd = tile(wrap, 'delta', 'FWD/BACK gain', 'delta');
   tileEls.dup = tile(wrap, 'delta', 'UP/DOWN gain', 'delta');
 }
 function tile(wrap, boatKey, label, kind) {
@@ -502,11 +574,18 @@ function sampleTest() {
   });
   if (p[0] && p[1]) {
     t.samples.push({ t: now, p });
-    // Place the waypoint at the first paired sample (VMC/TWA).
-    if (!t.waypoint && t.wp && t.samples.length >= 1) {
+    // Create the waypoint(s) at the first paired sample.
+    if (!t.waypoints && t.wp && t.samples.length >= 1) {
       const s0 = t.samples[0];
-      const mid = { lat: (s0.p[0].lat + s0.p[1].lat) / 2, lon: (s0.p[0].lon + s0.p[1].lon) / 2 };
-      t.waypoint = destPoint(mid.lat, mid.lon, t.wp.brg, t.wp.rngM);
+      const rIdx = Math.max(0, t.boats.findIndex((b) => b.id === t.refId));
+      if (t.type === 'VMC') {
+        // one waypoint from the master (reference) boat's start position
+        const rp = s0.p[rIdx];
+        t.waypoints = [destPoint(rp.lat, rp.lon, t.wp.brg, t.wp.rngM)];
+      } else {
+        // TWA: one waypoint per boat, from each boat's own start position
+        t.waypoints = s0.p.map((pp) => destPoint(pp.lat, pp.lon, t.wp.brg, t.wp.rngM));
+      }
     }
   }
   renderTest();
@@ -516,63 +595,102 @@ function sampleTest() {
   if (elapsed >= t.durationSec) finishTest('Complete');
 }
 
-// All gains follow the supplied definitions. The PRIMARY gain projects the boat
-// separation on: the TWD axis (VMG) or the bearing to the waypoint (VMC/TWA).
-// FWD/BACK and UP/DOWN project the relative displacement on the average-path axis
-// and its perpendicular. Every gain = value(now) − value(start).
+// Per-type gains, following the spec.
+//   VMG:  primary = separation on the TWD axis (sign flips downwind);
+//         FWD/BACK & UP/DOWN from the average-path frame.
+//   VMC:  primary = separation on the bearing to the single (master) waypoint;
+//         UP/DOWN = change in |separation on the perpendicular of that bearing|.
+//   TWA:  primary = (other's distance to its waypoint − ref's distance to its
+//         waypoint); UP/DOWN = change in |separation on the perpendicular of the
+//         target bearing|.  Every GAIN = value(now) − value(start).
 function computeGains(t) {
   const work = effectiveSamples(t);
   const refIdx = Math.max(0, t.boats.findIndex((b) => b.id === t.refId));
   const othIdx = refIdx === 0 ? 1 : 0;
-  const res = { series: { primary: [], up: [], fwd: [] }, cur: null, twdOverall: null, refIdx, othIdx };
+  const res = { series: { primary: [], up: [], fwd: [] }, cur: null, twdOverall: null, downwind: false, refIdx, othIdx, type: t.type };
   if (work.length < 1) return res;
 
   const origin = work[0].p[0];
   const P = (s, i) => enu(s.p[i].lat, s.p[i].lon, origin.lat, origin.lon);
-  let wpE = null, wpN = null;
-  if (t.waypoint) { const w = enu(t.waypoint.lat, t.waypoint.lon, origin.lat, origin.lon); wpE = w.e; wpN = w.n; }
-
-  const primaryAxis = (midE, midN, twdK) => {
-    if (t.type === 'VMG') { if (twdK == null) return null; const r = twdK * Math.PI / 180; return { x: Math.sin(r), y: Math.cos(r) }; }
-    if (wpE == null) return null;
-    const vx = wpE - midE, vy = wpN - midN, l = Math.hypot(vx, vy);
-    return l < 1e-6 ? null : { x: vx / l, y: vy / l };
-  };
+  const wpE = t.waypoints ? t.waypoints.map((w) => enu(w.lat, w.lon, origin.lat, origin.lon)) : null;
 
   const pos0 = [P(work[0], 0), P(work[0], 1)];
   const sep0 = { e: pos0[refIdx].e - pos0[othIdx].e, n: pos0[refIdx].n - pos0[othIdx].n };
   const mid0 = { e: (pos0[0].e + pos0[1].e) / 2, n: (pos0[0].n + pos0[1].n) / 2 };
+
+  // VMG downwind sign (overall track vs the wind)
+  let vmgSign = 1;
+  if (t.type === 'VMG') {
+    const allTwd = []; for (const s of work) for (const b of s.p) if (b.twd != null) allTwd.push(b.twd);
+    const twdAll = circMeanDeg(allTwd);
+    if (twdAll != null) {
+      const r = twdAll * Math.PI / 180;
+      const lm = { e: (P(work[work.length - 1], 0).e + P(work[work.length - 1], 1).e) / 2, n: (P(work[work.length - 1], 0).n + P(work[work.length - 1], 1).n) / 2 };
+      if ((lm.e - mid0.e) * Math.sin(r) + (lm.n - mid0.n) * Math.cos(r) < 0) vmgSign = -1;
+    }
+  }
+  res.downwind = vmgSign < 0;
+  const brgRad = (t.wp ? t.wp.brg : 0) * Math.PI / 180;
+  const brgAxis = { x: Math.sin(brgRad), y: Math.cos(brgRad) };
+
   let sSin = 0, sCos = 0;
   const addTwd = (s) => { for (const b of s.p) if (b.twd != null) { const r = b.twd * Math.PI / 180; sSin += Math.sin(r); sCos += Math.cos(r); } };
-  addTwd(work[0]);
-  const twd0 = (sSin === 0 && sCos === 0) ? null : (Math.atan2(sSin, sCos) * 180 / Math.PI + 360) % 360;
-  const ax0 = primaryAxis(mid0.e, mid0.n, twd0);
-  const adv0 = ax0 ? sep0.e * ax0.x + sep0.n * ax0.y : 0;
 
-  let cur = null;
-  for (let k = 1; k < work.length; k++) {
-    addTwd(work[k]);
-    const twdK = (sSin === 0 && sCos === 0) ? null : (Math.atan2(sSin, sCos) * 180 / Math.PI + 360) % 360;
-    res.twdOverall = twdK;
+  // returns { adv, perpAbs, fwd, up } for sample k (adv/perpAbs are absolute values, not gains)
+  function calc(k) {
     const posk = [P(work[k], 0), P(work[k], 1)];
     const sepk = { e: posk[refIdx].e - posk[othIdx].e, n: posk[refIdx].n - posk[othIdx].n };
     const midk = { e: (posk[0].e + posk[1].e) / 2, n: (posk[0].n + posk[1].n) / 2 };
 
-    const axk = primaryAxis(midk.e, midk.n, twdK);
-    let primary = null;
-    if (axk) primary = (sepk.e * axk.x + sepk.n * axk.y) - adv0;
-
-    let fwd = null, up = null;
-    const aE = midk.e - mid0.e, aN = midk.n - mid0.n, al = Math.hypot(aE, aN);
-    if (al >= 1) {
-      const ux = aE / al, uy = aN / al;
-      let px = -uy, py = ux;
-      const orient = axk || (twdK != null ? { x: Math.sin(twdK * Math.PI / 180), y: Math.cos(twdK * Math.PI / 180) } : null);
-      if (orient && (px * orient.x + py * orient.y) < 0) { px = -px; py = -py; }
-      const dE = sepk.e - sep0.e, dN = sepk.n - sep0.n;
-      fwd = dE * ux + dN * uy; up = dE * px + dN * py;
+    if (t.type === 'VMG') {
+      const twdK = (sSin === 0 && sCos === 0) ? null : (Math.atan2(sSin, sCos) * 180 / Math.PI + 360) % 360;
+      res.twdOverall = twdK;
+      let adv = null, ax = null;
+      if (twdK != null) { const r = twdK * Math.PI / 180; ax = { x: Math.sin(r) * vmgSign, y: Math.cos(r) * vmgSign }; adv = sepk.e * ax.x + sepk.n * ax.y; }
+      let fwd = null, up = null;
+      const aE = midk.e - mid0.e, aN = midk.n - mid0.n, al = Math.hypot(aE, aN);
+      if (al >= 1) {
+        const ux = aE / al, uy = aN / al; let px = -uy, py = ux;
+        if (ax && (px * ax.x + py * ax.y) < 0) { px = -px; py = -py; }
+        const dE = sepk.e - sep0.e, dN = sepk.n - sep0.n;
+        fwd = dE * ux + dN * uy; up = dE * px + dN * py;
+      }
+      return { adv, fwd, up, isDelta: true };   // fwd/up already are deltas
     }
+
+    if (t.type === 'VMC') {
+      if (!wpE) return { adv: null, perpAbs: null };
+      const wp = wpE[0], vx = wp.e - midk.e, vy = wp.n - midk.n, l = Math.hypot(vx, vy);
+      if (l < 1e-6) return { adv: null, perpAbs: null };
+      const ax = { x: vx / l, y: vy / l };
+      const adv = sepk.e * ax.x + sepk.n * ax.y;
+      const perpAbs = Math.abs(sepk.e * (-ax.y) + sepk.n * ax.x);
+      return { adv, perpAbs };
+    }
+
+    // TWA
+    if (!wpE) return { adv: null, perpAbs: null };
+    const dRef = Math.hypot(wpE[refIdx].e - posk[refIdx].e, wpE[refIdx].n - posk[refIdx].n);
+    const dOth = Math.hypot(wpE[othIdx].e - posk[othIdx].e, wpE[othIdx].n - posk[othIdx].n);
+    const adv = dOth - dRef;   // ref closer to its target ⇒ positive
+    const perpAbs = Math.abs(sepk.e * (-brgAxis.y) + sepk.n * brgAxis.x);
+    return { adv, perpAbs };
+  }
+
+  addTwd(work[0]);
+  const base = calc(0);
+  const adv0 = base.adv != null ? base.adv : 0;
+  const perp0 = base.perpAbs != null ? base.perpAbs : 0;
+
+  let cur = null;
+  for (let k = 1; k < work.length; k++) {
+    addTwd(work[k]);
+    const c = calc(k);
     const x = (work[k].t - work[0].t) / 1000;
+    let primary = null, up = null, fwd = null;
+    if (c.adv != null) primary = c.adv - adv0;
+    if (t.type === 'VMG') { fwd = c.fwd; up = c.up; }
+    else if (c.perpAbs != null) up = c.perpAbs - perp0;
     if (primary != null) res.series.primary.push({ x, y: primary });
     if (up != null) res.series.up.push({ x, y: up });
     if (fwd != null) res.series.fwd.push({ x, y: fwd });
@@ -586,11 +704,11 @@ function renderTest() {
   const t = state.test; if (!t) return;
   const g = computeGains(t);
   const ref = t.boats[g.refIdx], other = t.boats[g.othIdx];
-  const primaryLabel = t.type === 'VMG' ? 'VMG' : 'VMC';
+  const primaryLabel = t.type === 'VMG' ? 'VMG' : (t.type === 'VMC' ? 'VMC' : 'TWA');
 
   let meta = `Ref <b style="color:${ref.color}">${ref.name}</b>`;
-  if (t.type === 'VMG') meta += ` · TWD used ${g.twdOverall == null ? '—' : String(Math.round(g.twdOverall)).padStart(3, '0') + '°'}`;
-  else if (t.wp) meta += ` · WP ${String(Math.round(t.wp.brg)).padStart(3, '0')}° / ${(t.wp.rngM / NM_TO_M).toFixed(1)} nm`;
+  if (t.type === 'VMG') meta += ` · TWD used ${g.twdOverall == null ? '—' : String(Math.round(g.twdOverall)).padStart(3, '0') + '°'}` + (g.downwind ? ' · downwind' : ' · upwind');
+  else if (t.wp) meta += ` · WP ${String(Math.round(t.wp.brg)).padStart(3, '0')}° / ${(t.wp.rngM / NM_TO_M).toFixed(1)} nm` + (t.type === 'TWA' ? ' (per boat)' : ' (from master)');
   $('test-meta').innerHTML = meta;
 
   const blank = (k) => setDelta(k, 0, '', '', 0, true);
@@ -599,13 +717,12 @@ function renderTest() {
     const cur = g.cur;
     const mins = (cur.t - effectiveSamples(t)[0].t) / 60000;
     if (cur.primary != null) {
-      setDelta('dvmg', cur.primary, 'm', `${primaryLabel} gain, Δ`);
+      setDelta('dvmg', cur.primary, 'm', g.downwind ? `${primaryLabel} gain (downwind)` : `${primaryLabel} gain`);
       setDelta('rate', mins > 0 ? cur.primary / mins : 0, 'm/min', `${primaryLabel} gain ÷ min`, 1);
     } else { blank('dvmg'); blank('rate'); }
-    if (cur.fwd != null) setDelta('dfwd', cur.fwd, 'm', 'along average path'); else blank('dfwd');
-    if (cur.up != null) setDelta('dup', cur.up, 'm', 'perp of avg path'); else blank('dup');
+    if (t.type === 'VMG') { if (cur.fwd != null) setDelta('dfwd', cur.fwd, 'm', 'along average path'); else blank('dfwd'); }
+    if (cur.up != null) setDelta('dup', cur.up, 'm', t.type === 'VMG' ? 'perp of avg path' : 'perp of WP bearing'); else blank('dup');
 
-    // snapshot for the history row
     const winner = (cur.primary == null || Math.abs(cur.primary) < 0.05) ? '—' : (cur.primary > 0 ? ref.name : other.name);
     t.result = {
       type: t.type, startTs: t.startTs,
@@ -617,10 +734,11 @@ function renderTest() {
   }
 
   if (chartVMG) chartVMG.setSeries([{ label: `${primaryLabel} gain`, color: '#37e0cf', points: g.series.primary }], { xMax: t.durationSec, includeZero: true });
-  if (chartUP) chartUP.setSeries([
-    { label: 'UP/DOWN', color: '#37e0cf', points: g.series.up },
-    { label: 'FWD/BACK', color: '#ff8a5b', points: g.series.fwd },
-  ], { xMax: t.durationSec, includeZero: true });
+  if (chartUP) {
+    const s = [{ label: 'UP/DOWN', color: '#37e0cf', points: g.series.up }];
+    if (t.type === 'VMG') s.push({ label: 'FWD/BACK', color: '#ff8a5b', points: g.series.fwd });
+    chartUP.setSeries(s, { xMax: t.durationSec, includeZero: true });
+  }
 }
 
 function setDelta(key, value, unit, sub, dp, blank) {
@@ -657,7 +775,11 @@ function applyTrim() {
 function saveTest() {
   const t = state.test; if (!t) return;
   renderTest();
-  if (t.result) { history.unshift(t.result); saveHistory(); renderHistory(); }
+  if (t.result) {
+    t.result.avg = computeTestAverages(t);
+    t.result.boats = t.boats.map((b) => b.name);
+    history.unshift(t.result); saveHistory(); renderHistory();
+  }
   closeTest();
 }
 function closeTest() {
@@ -670,13 +792,49 @@ function closeTest() {
   gateControls();
 }
 
+// Whole-test average of each channel, per boat, over the (trimmed) test window.
+const AVG_CH = [
+  { key: 'bsp', label: 'BS', angular: false, dp: 1 },
+  { key: 'tws', label: 'TWS', angular: false, dp: 1 },
+  { key: 'twd', label: 'TWD', angular: true, dp: 0 },
+  { key: 'hdg', label: 'HDG', angular: true, dp: 0 },
+  { key: 'cog', label: 'COG', angular: true, dp: 0 },
+  { key: 'sog', label: 'SOG', angular: false, dp: 1 },
+  { key: 'heel', label: 'HEEL', angular: false, dp: 1 },
+  { key: 'rudder', label: 'RUD', angular: false, dp: 1 },
+];
+function computeTestAverages(t) {
+  const eff = effectiveSamples(t);
+  const endT = eff.length ? eff[eff.length - 1].t : Date.now();
+  return t.boats.map((b) => {
+    const hist = (b.rt.hist || []).filter((h) => h.t >= t.startTs && h.t <= endT);
+    const o = {};
+    for (const ch of AVG_CH) {
+      let s = 0, c = 0, sum = 0, n = 0;
+      for (const h of hist) { const v = h[ch.key]; if (v == null || Number.isNaN(v)) continue; n++; sum += v; const r = v * Math.PI / 180; s += Math.sin(r); c += Math.cos(r); }
+      o[ch.key] = n ? (ch.angular ? (Math.atan2(s, c) * 180 / Math.PI + 360) % 360 : sum / n) : null;
+    }
+    return o;
+  });
+}
+
 /* ---------- test history ---------- */
 const HISTORY_KEY = 'boat-receiver:history:v1';
 let history = [];
 function loadHistory() { try { const r = localStorage.getItem(HISTORY_KEY); if (r) history = JSON.parse(r); } catch (_) { history = []; } }
 function saveHistory() { try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 200))); } catch (_) {} }
-function fmtClock(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2, '0'); return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+function clearHistory() {
+  if (!history.length) return;
+  if (!confirm('Clear all saved test results?')) return;
+  history = []; saveHistory(); renderHistory();
+}
+function fmtDateTime(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
 function num(v, dp) { return (v == null || Number.isNaN(v)) ? '—' : (v >= 0 ? '+' : '−') + Math.abs(+v.toFixed(dp)); }
+function avgCell(r, key, dp) {
+  if (!r.avg) return '—';
+  const f = (x) => (x == null || Number.isNaN(x)) ? '—' : (+x).toFixed(dp);
+  return `${f(r.avg[0] && r.avg[0][key])}/${f(r.avg[1] && r.avg[1][key])}`;
+}
 function renderHistory() {
   const body = $('history-body'); if (!body) return;
   body.innerHTML = '';
@@ -684,22 +842,31 @@ function renderHistory() {
   for (const r of history) {
     const tr = document.createElement('tr');
     const cells = [
-      fmtClock(r.startTs), r.type, mmss(r.durationSec), r.winner,
+      fmtDateTime(r.startTs), r.type, mmss(r.durationSec), r.winner,
       r.rate == null ? '—' : `${num(r.rate, 1)} m/min`,
       num(r.fwd, 0), num(r.up, 0),
+      ...AVG_CH.map((ch) => avgCell(r, ch.key, ch.dp)),
     ];
     for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
     body.appendChild(tr);
   }
 }
 function exportCSV() {
-  const head = ['Start', 'Type', 'Duration', 'Winner', 'Gain rate (m/min)', 'FWD/BACK (m)', 'UP/DOWN (m)'];
-  const rows = history.map((r) => [
-    new Date(r.startTs).toISOString(), r.type, mmss(r.durationSec), r.winner,
-    r.rate == null ? '' : r.rate.toFixed(1),
-    r.fwd == null ? '' : r.fwd.toFixed(0),
-    r.up == null ? '' : r.up.toFixed(0),
-  ]);
+  const head = ['Date', 'Type', 'Duration', 'Winner', 'Gain rate (m/min)', 'FWD/BACK (m)', 'UP/DOWN (m)'];
+  for (const bi of [0, 1]) for (const ch of AVG_CH) head.push(`Boat${bi + 1} avg ${ch.label}`);
+  head.push('Boat1 name', 'Boat2 name');
+  const val = (x, dp) => (x == null || Number.isNaN(x)) ? '' : (+x).toFixed(dp);
+  const rows = history.map((r) => {
+    const row = [
+      fmtDateTime(r.startTs), r.type, mmss(r.durationSec), r.winner,
+      r.rate == null ? '' : r.rate.toFixed(1),
+      r.fwd == null ? '' : r.fwd.toFixed(0),
+      r.up == null ? '' : r.up.toFixed(0),
+    ];
+    for (const bi of [0, 1]) for (const ch of AVG_CH) row.push(val(r.avg && r.avg[bi] && r.avg[bi][ch.key], ch.dp));
+    row.push((r.boats && r.boats[0]) || '', (r.boats && r.boats[1]) || '');
+    return row;
+  });
   const csv = [head, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
@@ -727,6 +894,7 @@ $('trim-apply').addEventListener('click', applyTrim);
 $('test-discard').addEventListener('click', closeTest);
 $('test-save').addEventListener('click', saveTest);
 $('export-csv').addEventListener('click', exportCSV);
+$('clear-history').addEventListener('click', clearHistory);
 
 $('duration-start').addEventListener('click', () => {
   const mins = Math.max(1, parseInt($('duration-input').value, 10) || 5);
