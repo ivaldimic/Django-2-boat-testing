@@ -87,6 +87,10 @@ let running = true;
 boats.forEach((b) => {
   b.wss.on('connection', (ws) => {
     console.log(`${b.name}: app connected (${b.wss.clients.size} on port ${b.port})`);
+    // Relay a client's message to the other clients on this boat (master → viewers sync).
+    ws.on('message', (data, isBinary) => {
+      for (const c of b.wss.clients) if (c !== ws && c.readyState === 1) c.send(data, { binary: isBinary });
+    });
     ws.on('close', () => console.log(`${b.name}: app disconnected (${b.wss.clients.size} on port ${b.port})`));
   });
   b.wss.on('listening', () => console.log(`${b.name}: serving NMEA at ws://localhost:${b.port}`));

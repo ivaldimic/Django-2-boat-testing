@@ -101,6 +101,11 @@ function handleFrame(rt, data) {
     if (typeof Blob !== 'undefined' && data instanceof Blob) { data.text().then((t) => handleFrame(rt, t)).catch(() => {}); return; }
     try { data = new TextDecoder().decode(data); } catch (_) { return; }
   }
+  // Control channel (master → viewer sync) arrives as a single JSON message.
+  const trimmed = data.trim();
+  if (trimmed.startsWith('{')) {
+    try { const m = JSON.parse(trimmed); if (m && m.ctl) { handleControl(m); return; } } catch (_) {}
+  }
   const ts = Date.now();
   const lines = data.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   for (const line of (lines.length ? lines : [data.trim()])) onLine(rt, line, ts);
@@ -496,27 +501,99 @@ function startTest(type, durationSec, wpRngNm, wpBrg) {
   clearInterval(state.test.timer);
   state.test.timer = setInterval(sampleTest, 1000);
   sampleTest();
+  broadcastSync();
+}
+
+/* ---------- master → viewer sync ---------- */
+function broadcastControl(obj) {
+  const msg = JSON.stringify({ ctl: 1, ...obj });
+  for (const rt of state.rt.values()) {
+    if (rt.ws && rt.ws.readyState === 1) { try { rt.ws.send(msg); } catch (_) {} }
+  }
+}
+function testSyncPayload() {
+  const t = state.test; if (!t) return null;
+  return {
+    type: t.type, startTs: t.startTs, durationSec: t.durationSec, refId: t.refId,
+    waypoints: t.waypoints || null, wp: t.wp || null,
+    running: !!t.running, trimSec: t.trimSec || 0,
+    status: $('test-status').textContent,
+  };
+}
+function broadcastSync() {
+  if (state.role !== 'master') return;
+  broadcastControl({ kind: 'sync', test: testSyncPayload() });
+}
+function handleControl(m) {
+  if (state.role !== 'viewer') return;           // only viewers mirror
+  if (m.kind === 'sync') applyRemoteSync(m.test);
+}
+function startRemoteTest(rt) {
+  if (state.test) { clearInterval(state.test.timer); }
+  const boats = testBoats();
+  if (boats.length < 2) return;
+  for (const b of boats) b.rt.tavg = {};
+  state.test = {
+    type: rt.type, durationSec: rt.durationSec, startTs: rt.startTs, running: rt.running,
+    boats, refId: rt.refId, waypoints: rt.waypoints || null, wp: rt.wp || null,
+    samples: [], trimSec: rt.trimSec || 0, result: null, remote: true,
+    series: { primary: [], up: [], fwd: [] }, timer: null, lastSync: Date.now(),
+  };
+  $('test-title').textContent = `${rt.type} test`;
+  $('test-duration').textContent = mmss(rt.durationSec);
+  $('test-status').textContent = rt.status || 'Running';
+  $('test-stop').hidden = true;                   // viewers have no controls
+  $('test-review').hidden = true;
+  $('test-view').hidden = false;
+  buildRefSwitch(boats);
+  buildTiles(rt.type);
+  if (!chartVMG) chartVMG = new LineChart($('chart-vmg'));
+  if (!chartUP) chartUP = new LineChart($('chart-up'));
+  if (rt.running) state.test.timer = setInterval(sampleTest, 1000);
+  sampleTest();
+}
+function applyRemoteSync(rt) {
+  if (!rt) { if (state.test && state.test.remote) closeTest(); return; }
+  if (!state.test || !state.test.remote || state.test.startTs !== rt.startTs) startRemoteTest(rt);
+  const t = state.test; if (!t || !t.remote) return;
+  t.refId = rt.refId; t.trimSec = rt.trimSec || 0; t.durationSec = rt.durationSec;
+  if (rt.waypoints) t.waypoints = rt.waypoints;
+  if (rt.wp) t.wp = rt.wp;
+  t.running = rt.running;
+  if (!rt.running && t.timer) { clearInterval(t.timer); t.timer = null; }
+  t.lastSync = Date.now();
+  $('test-status').textContent = rt.status || (rt.running ? 'Running' : 'Stopped');
+  updateRefSwitchPressed();
+  renderTest();
 }
 
 function buildRefSwitch(boats) {
   const wrap = $('ref-switch'); wrap.innerHTML = '';
   const lab = document.createElement('span'); lab.className = 'ref-switch__label'; lab.textContent = 'Reference';
   wrap.appendChild(lab);
+  const isMaster = state.role === 'master';
   for (const b of boats) {
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'seg';
     btn.textContent = b.name;
     btn.style.borderColor = b.color;
+    btn.dataset.id = b.id;
+    btn.disabled = !isMaster;                 // viewers can't change the reference
     btn.setAttribute('aria-pressed', String(b.id === state.test.refId));
     btn.addEventListener('click', () => {
-      const t = state.test; if (!t) return;
+      const t = state.test; if (!t || state.role !== 'master') return;
       if (t.refId === b.id) return;
       t.refId = b.id;
       for (const s of wrap.querySelectorAll('.seg')) s.setAttribute('aria-pressed', String(s === btn));
-      renderVMG();
+      renderTest();
+      broadcastSync();
     });
     wrap.appendChild(btn);
   }
+}
+function updateRefSwitchPressed() {
+  const t = state.test; if (!t) return;
+  for (const s of $('ref-switch').querySelectorAll('.seg')) s.setAttribute('aria-pressed', String(s.dataset.id === t.refId));
 }
 
 const tileEls = {};
@@ -574,8 +651,9 @@ function sampleTest() {
   });
   if (p[0] && p[1]) {
     t.samples.push({ t: now, p });
-    // Create the waypoint(s) at the first paired sample.
-    if (!t.waypoints && t.wp && t.samples.length >= 1) {
+    // Create the waypoint(s) at the first paired sample (master only; viewers
+    // receive the exact waypoints from the master via sync).
+    if (!t.waypoints && t.wp && !t.remote && t.samples.length >= 1) {
       const s0 = t.samples[0];
       const rIdx = Math.max(0, t.boats.findIndex((b) => b.id === t.refId));
       if (t.type === 'VMC') {
@@ -759,18 +837,21 @@ function setDelta(key, value, unit, sub, dp, blank) {
 
 function finishTest(label) {
   const t = state.test; if (!t) return;
-  clearInterval(t.timer); t.running = false;
+  clearInterval(t.timer); t.timer = null; t.running = false;
   $('test-status').textContent = label;
   $('test-stop').hidden = true;
+  if (t.remote) { $('test-review').hidden = true; renderTest(); return; }
   $('test-review').hidden = false;
-  $('trim-sec').value = '0';
+  $('trim-sec').value = String(t.trimSec || 0);
   renderTest();
+  broadcastSync();
 }
 function applyTrim() {
   const t = state.test; if (!t) return;
   t.trimSec = Math.max(0, parseInt($('trim-sec').value, 10) || 0);
   $('test-status').textContent = t.trimSec > 0 ? `Trimmed −${t.trimSec}s` : 'Stopped';
   renderTest();
+  broadcastSync();
 }
 function saveTest() {
   const t = state.test; if (!t) return;
@@ -783,6 +864,7 @@ function saveTest() {
   closeTest();
 }
 function closeTest() {
+  if (state.role === 'master') broadcastControl({ kind: 'sync', test: null });
   if (state.test) clearInterval(state.test.timer);
   state.test = null;
   $('test-view').hidden = true;
@@ -791,6 +873,13 @@ function closeTest() {
   $('test-meta').innerHTML = '';
   gateControls();
 }
+
+// Heartbeat: masters re-broadcast the live test so late-joining viewers catch up;
+// viewers drop a mirrored test if the master's sync goes silent.
+setInterval(() => {
+  if (state.role === 'master' && state.test) broadcastSync();
+  if (state.role === 'viewer' && state.test && state.test.remote && Date.now() - (state.test.lastSync || 0) > 6000) closeTest();
+}, 1500);
 
 // Whole-test average of each channel, per boat, over the (trimmed) test window.
 const AVG_CH = [

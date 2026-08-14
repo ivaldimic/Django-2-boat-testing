@@ -67,6 +67,10 @@ const wss = new WebSocketServer({ server: httpServer });
 
 wss.on('connection', (ws, req) => {
   console.log(`Web app connected from ${req.socket.remoteAddress} (${wss.clients.size} connected)`);
+  // Relay any message a client sends to the OTHER clients (master → viewers sync).
+  ws.on('message', (data, isBinary) => {
+    for (const c of wss.clients) if (c !== ws && c.readyState === 1) c.send(data, { binary: isBinary });
+  });
   ws.on('close', () => console.log(`Web app disconnected (${wss.clients.size} connected)`));
 });
 

@@ -54,7 +54,9 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
 ## Using the app
 
 1. **Pick a role.** The first screen asks master or viewer. The **master** runs
-   the tests; **viewers** watch. Change it later in Settings.
+   the tests; **viewers** watch and their screen **mirrors the master's running
+   test** — start, stop, duration, waypoint, reference boat and trim all follow
+   the master live (see "Master → viewer sync" below). Change it later in Settings.
 2. **Check connections.** The bar under the title shows each boat Live / No data /
    Offline with its data rate. Settings has the same plus the raw stream.
 3. **Run a test.** Three buttons top-left:
@@ -133,12 +135,23 @@ Per boat PC: install the `bridge/`, point Expedition's UDP at it, and run it (se
 `bridge/README.md`). Then in the app's **Settings**, set the two boats to each
 bridge's address, e.g. `ws://192.168.1.101:8080` and `ws://192.168.1.102:8080`.
 
-## Known next step: master → viewer sync
+## Master → viewer sync
 
-Right now the role is per device: a viewer's screen does not yet mirror the
-master's running test, because that needs a shared control channel (the master's
-start/stop/duration relayed to viewers). The bridge/simulator can carry it — say
-the word and I'll add it so viewers follow the master automatically.
+Viewers mirror the master's test automatically. The master broadcasts the test
+state — type, start time, duration, reference boat, waypoint(s), running/stopped
+and trim — as small JSON control messages over the **same boat WebSockets**. The
+bridge (and the simulator) **relay** each client's message to the other connected
+clients, so viewers receive it. Each viewer then reconstructs the test in mirror
+from its **own** identical boat feed plus those parameters, so only the light
+parameters travel, not the full sample stream.
+
+A viewer's test view is read-only: the Stop/Trim/Save/Discard controls and the
+reference switch are hidden or disabled, and it follows the master's Stop, trim
+and Close. The master re-sends the state every ~1.5 s as a heartbeat, so a viewer
+that joins after a test has started still catches up; if the master's sync goes
+silent for a few seconds the viewer drops the mirrored test. This needs every
+client to share at least one bridge (normally all connect to both boats), and the
+bridge/simulator relay to be running (both included here).
 
 ## Add to the git repo
 
