@@ -527,6 +527,12 @@ function broadcastSync() {
 function handleControl(m) {
   if (state.role !== 'viewer') return;           // only viewers mirror
   if (m.kind === 'sync') applyRemoteSync(m.test);
+  else if (m.kind === 'result') addRemoteResult(m.result);
+}
+function addRemoteResult(r) {
+  if (!r || !r.startTs) return;
+  if (history.some((h) => h.startTs === r.startTs && h.type === r.type)) return;  // dedupe
+  history.unshift(r); saveHistory(); renderHistory();
 }
 function startRemoteTest(rt) {
   if (state.test) { clearInterval(state.test.timer); }
@@ -860,6 +866,9 @@ function saveTest() {
     t.result.avg = computeTestAverages(t);
     t.result.boats = t.boats.map((b) => b.name);
     history.unshift(t.result); saveHistory(); renderHistory();
+    const r = t.result;
+    broadcastControl({ kind: 'result', result: r });                       // send the row to viewers
+    setTimeout(() => broadcastControl({ kind: 'result', result: r }), 700); // resend once for reliability
   }
   closeTest();
 }
