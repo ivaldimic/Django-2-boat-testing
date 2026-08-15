@@ -1,5 +1,9 @@
 {
   "udpPort": 5555,
   "port": 8080,
-  "serveWebApp": true
+  "serveWebApp": true,
+  "expedition": {
+    "host": "127.0.0.1",
+    "port": 5556
+  }
 }

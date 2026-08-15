@@ -28,6 +28,9 @@ try {
   console.warn('No readable config.json found — using defaults (udpPort 5555, port 8080).');
 }
 const { udpPort, port, serveWebApp } = config;
+// Where to send waypoints so Expedition receives them (Expedition must be set to
+// read incoming NMEA on this host:port). Configure `expedition` in config.json.
+const exp = Object.assign({ host: '127.0.0.1', port: 0 }, config.expedition || {});
 
 // The web app lives in the repo root, one level up from this bridge folder.
 const WEB_ROOT = path.join(__dirname, '..');
@@ -67,12 +70,43 @@ const wss = new WebSocketServer({ server: httpServer });
 
 wss.on('connection', (ws, req) => {
   console.log(`Web app connected from ${req.socket.remoteAddress} (${wss.clients.size} connected)`);
-  // Relay any message a client sends to the OTHER clients (master → viewers sync).
   ws.on('message', (data, isBinary) => {
+    const s = data.toString();
+    if (s.startsWith('{')) {
+      try {
+        const m = JSON.parse(s);
+        if (m && m.kind === 'waypoint' && Number.isFinite(m.lat) && Number.isFinite(m.lon)) {
+          sendWaypointToExpedition(m); return;      // don't relay waypoints to other clients
+        }
+      } catch (_) {}
+    }
+    // Otherwise relay (master → viewer sync/result) to the OTHER clients.
     for (const c of wss.clients) if (c !== ws && c.readyState === 1) c.send(data, { binary: isBinary });
   });
   ws.on('close', () => console.log(`Web app disconnected (${wss.clients.size} connected)`));
 });
+
+// ---- Send a waypoint to Expedition as a WPL sentence over UDP --------------
+function nmeaChecksum(body) {
+  let c = 0; for (let i = 0; i < body.length; i++) c ^= body.charCodeAt(i);
+  return c.toString(16).toUpperCase().padStart(2, '0');
+}
+function ddm(v, degWidth) {
+  const a = Math.abs(v), d = Math.floor(a), m = (a - d) * 60;
+  return `${String(d).padStart(degWidth, '0')}${m.toFixed(4).padStart(7, '0')}`;
+}
+function sendWaypointToExpedition(m) {
+  if (!exp.port) { console.log(`waypoint ${m.name} ${m.lat.toFixed(5)},${m.lon.toFixed(5)} — set "expedition":{"port":N} in config.json to forward to Expedition`); return; }
+  const name = String(m.name || 'WP').slice(0, 12).replace(/[^\w-]/g, '');
+  const body = `ECWPL,${ddm(m.lat, 2)},${m.lat >= 0 ? 'N' : 'S'},${ddm(m.lon, 3)},${m.lon >= 0 ? 'E' : 'W'},${name}`;
+  const sentence = `$${body}*${nmeaChecksum(body)}\r\n`;
+  const sock = dgram.createSocket('udp4');
+  sock.send(Buffer.from(sentence), exp.port, exp.host, (err) => {
+    if (err) console.error(`waypoint send error: ${err.message}`);
+    else console.log(`waypoint → Expedition ${exp.host}:${exp.port}  ${sentence.trim()}`);
+    sock.close();
+  });
+}
 
 function broadcast(text) {
   for (const client of wss.clients) {

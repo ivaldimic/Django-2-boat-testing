@@ -37,6 +37,7 @@
             <span class="testview__status" id="test-status"></span>
           </div>
           <div class="testview__meta" id="test-meta"></div>
+          <div class="testview__waypoints" id="test-waypoints"></div>
         </div>
         <div class="testview__controls">
           <div class="ref-switch" id="ref-switch"></div>
@@ -80,7 +81,14 @@
 
       <figure class="map">
         <figcaption>Tracks</figcaption>
-        <canvas id="map"></canvas>
+        <div class="map__wrap">
+          <canvas id="map"></canvas>
+          <div class="map__zoom">
+            <button type="button" id="map-in" aria-label="Zoom in">+</button>
+            <button type="button" id="map-out" aria-label="Zoom out">−</button>
+            <button type="button" id="map-fit" aria-label="Fit">⤢</button>
+          </div>
+        </div>
       </figure>
 
       <section class="strips-wrap">
@@ -101,6 +109,7 @@
     <section class="history" id="history" hidden>
       <div class="history__head">
         <h2>Test history</h2>
+        <div class="history__legend" id="history-legend"></div>
         <div class="history__actions">
           <button class="ghost-btn" id="export-csv" type="button">Export CSV</button>
           <button class="ghost-btn" id="clear-history" type="button">Clear</button>
@@ -114,7 +123,7 @@
           <tbody id="history-body"></tbody>
         </table>
       </div>
-      <p class="history__note">Average columns show boat 1 / boat 2 over the whole test.</p>
+      <p class="history__note">Average columns show the two boats by colour (see the legend above).</p>
     </section>
 
     <details class="streams-wrap">

@@ -94,6 +94,14 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
      much closer the reference boat is to its waypoint than the other is to
      theirs (other's distance − reference's distance), now minus at the start.
      **UP/DOWN** as in VMC.
+   - **Waypoints on screen and to Expedition.** For VMC and TWA the waypoint
+     latitude/longitude is shown at the top of the test view ("VMC waypoint …",
+     or "Waypoint <boat> …" per boat for TWA) and drawn as a diamond on the map.
+     Each waypoint is also **sent to Expedition on the relevant boat** as a WPL
+     sentence: the app pushes it to that boat's bridge, which forwards it over UDP.
+     Set `"expedition": { "host": "127.0.0.1", "port": N }` in `bridge/config.json`
+     to the host/port Expedition is configured to read NMEA input on (leave the
+     port unset and the bridge just logs the waypoint).
    - **Stop, then review** — stopping a test lets you **trim** the last N seconds
      (e.g. if the boats bore away at the end) and recompute, then **Save** it to
      the history or **Discard** it.
@@ -104,7 +112,7 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
      (boat 1 → boat 2), updated continuously.
    - **Track plot** — a north-up, equal-scale local plot of both boats with their
      tracks, a dashed range line, a heading tick per boat, a north arrow and a
-     scale bar. It auto-zooms to keep both boats in view. It's offline (no map
+     scale bar. It auto-zooms to keep both boats in view. Zoom with the wheel, pinch or the +/−/⤢ buttons (drag to pan; Fit resets); test waypoints show as diamonds. It's offline (no map
      tiles); if you later want a geographic basemap where there's signal, that can
      be added.
    - **Strip charts** — one trace per boat, with each boat's current value in the
@@ -115,8 +123,8 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
      top. Your choice of strips and window is saved on the device.
 5. **Test history** — at the bottom of the page, one row per saved test: date &
    time, type (VMG/VMC/TWA), duration, winner, gain rate, FWD/BACK, UP/DOWN, and
-   the whole-test averages of **BS, TWS, TWD, HDG, COG, SOG, HEEL, RUDDER** shown
-   as boat 1 / boat 2. **Export CSV** downloads everything (each average as a
+   the whole-test averages of **BS, TWS, TWD, HDG, COG, SOG, HEEL, RUDDER**, each
+   shown as the two boats by **colour** (a legend maps colour to boat name). **Export CSV** downloads everything (each average as a
    separate per-boat column); **Clear** empties the history. Stored on the device.
 
 The simulator now also sends boat speed (`VHW`), heel (`XDR/ROLL`) and rudder

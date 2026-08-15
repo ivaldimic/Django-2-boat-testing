@@ -317,7 +317,12 @@ function renderDashboard(now) {
   }
   if (a && b) $('rb-note').innerHTML = `${a.name} &rarr; ${b.name}`;
 
-  trackMap.setData({ boats, range, bearing });
+  const marks = [];
+  if (state.test && state.test.waypoints) {
+    if (state.test.type === 'VMC') { const w = state.test.waypoints[0]; if (w) marks.push({ name: 'VMC WP', lat: w.lat, lon: w.lon }); }
+    else state.test.boats.forEach((b, i) => { const w = state.test.waypoints[i]; if (w) marks.push({ name: b.name, lat: w.lat, lon: w.lon, color: b.color }); });
+  }
+  trackMap.setData({ boats, range, bearing, marks });
 
   const win = state.stripWindowMs;
   const t0 = now - win;
@@ -375,6 +380,9 @@ function openStripPicker() {
 }
 $('add-strip').addEventListener('click', openStripPicker);
 $('strip-cancel').addEventListener('click', () => { $('strip-modal').hidden = true; });
+$('map-in').addEventListener('click', () => trackMap && trackMap.zoomAt(trackMap.W / 2, trackMap.H / 2, 1.3));
+$('map-out').addEventListener('click', () => trackMap && trackMap.zoomAt(trackMap.W / 2, trackMap.H / 2, 1 / 1.3));
+$('map-fit').addEventListener('click', () => trackMap && trackMap.fit());
 refreshTF();
 
 /* ---------- roles ---------- */
@@ -505,6 +513,20 @@ function startTest(type, durationSec, wpRngNm, wpBrg) {
 }
 
 /* ---------- master → viewer sync ---------- */
+function sendWaypointToBoat(rt, name, lat, lon) {
+  if (!rt || !rt.ws || rt.ws.readyState !== 1) return;
+  try { rt.ws.send(JSON.stringify({ ctl: 1, kind: 'waypoint', name, lat, lon })); } catch (_) {}
+}
+// Push the test waypoint(s) to Expedition on each boat (its bridge forwards them).
+function sendWaypointsToExpedition(t) {
+  if (!t.waypoints) return;
+  if (t.type === 'VMC') {
+    const w = t.waypoints[0]; if (!w) return;
+    for (const b of t.boats) sendWaypointToBoat(b.rt, 'VMC', w.lat, w.lon);   // same distant WP to both boats
+  } else {
+    t.boats.forEach((b, i) => { const w = t.waypoints[i]; if (w) sendWaypointToBoat(b.rt, `TWA_${b.name}`.replace(/\s+/g, '_'), w.lat, w.lon); });
+  }
+}
 function broadcastControl(obj) {
   const msg = JSON.stringify({ ctl: 1, ...obj });
   for (const rt of state.rt.values()) {
@@ -635,6 +657,14 @@ function enu(lat, lon, lat0, lon0) {
 }
 
 const NM_TO_M = 1852;
+function fmtLatLon(wp) {
+  const ll = (v, pos, neg, deg) => {
+    const h = v >= 0 ? pos : neg; const a = Math.abs(v);
+    const d = Math.floor(a); const m = (a - d) * 60;
+    return `${String(d).padStart(deg, '0')}°${m.toFixed(3)}′${h}`;
+  };
+  return `${ll(wp.lat, 'N', 'S', 2)} ${ll(wp.lon, 'E', 'W', 3)}`;
+}
 function destPoint(lat, lon, brgDeg, distM) {
   const LAT_M = 111132, lonM = 111320 * Math.cos(lat * Math.PI / 180);
   const r = brgDeg * Math.PI / 180;
@@ -670,6 +700,7 @@ function sampleTest() {
         // TWA: one waypoint per boat, from each boat's own start position
         t.waypoints = s0.p.map((pp) => destPoint(pp.lat, pp.lon, t.wp.brg, t.wp.rngM));
       }
+      sendWaypointsToExpedition(t);
     }
   }
   renderTest();
@@ -795,6 +826,16 @@ function renderTest() {
   else if (t.wp) meta += ` · WP ${String(Math.round(t.wp.brg)).padStart(3, '0')}° / ${(t.wp.rngM / NM_TO_M).toFixed(1)} nm` + (t.type === 'TWA' ? ' (per boat)' : ' (from master)');
   $('test-meta').innerHTML = meta;
 
+  const wpEl = $('test-waypoints');
+  if (wpEl) {
+    if (t.type === 'VMC' && t.waypoints && t.waypoints[0]) {
+      wpEl.innerHTML = `<span class="wp-item"><span class="wp-tag">VMC waypoint</span> <span class="wp-ll">${fmtLatLon(t.waypoints[0])}</span></span>`;
+    } else if (t.type === 'TWA' && t.waypoints) {
+      wpEl.innerHTML = t.boats.map((b, i) => t.waypoints[i]
+        ? `<span class="wp-item"><span class="wp-tag" style="color:${b.color}">Waypoint ${b.name}</span> <span class="wp-ll">${fmtLatLon(t.waypoints[i])}</span></span>` : '').join('');
+    } else wpEl.innerHTML = '';
+  }
+
   const blank = (k) => setDelta(k, 0, '', '', 0, true);
   if (!g.cur) { ['dvmg', 'rate', 'dfwd', 'dup'].forEach(blank); t.result = null; }
   else {
@@ -865,6 +906,7 @@ function saveTest() {
   if (t.result) {
     t.result.avg = computeTestAverages(t);
     t.result.boats = t.boats.map((b) => b.name);
+    t.result.colors = t.boats.map((b) => b.color);
     history.unshift(t.result); saveHistory(); renderHistory();
     const r = t.result;
     broadcastControl({ kind: 'result', result: r });                       // send the row to viewers
@@ -928,24 +970,39 @@ function clearHistory() {
 }
 function fmtDateTime(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
 function num(v, dp) { return (v == null || Number.isNaN(v)) ? '—' : (v >= 0 ? '+' : '−') + Math.abs(+v.toFixed(dp)); }
-function avgCell(r, key, dp) {
-  if (!r.avg) return '—';
+function avgCellHTML(r, key, dp) {
+  const c = r.colors || ['#8fb0c4', '#8fb0c4'];
   const f = (x) => (x == null || Number.isNaN(x)) ? '—' : (+x).toFixed(dp);
-  return `${f(r.avg[0] && r.avg[0][key])}/${f(r.avg[1] && r.avg[1][key])}`;
+  const v0 = f(r.avg && r.avg[0] && r.avg[0][key]);
+  const v1 = f(r.avg && r.avg[1] && r.avg[1][key]);
+  return `<span style="color:${c[0]}">${v0}</span><span class="avgsep">/</span><span style="color:${c[1]}">${v1}</span>`;
 }
 function renderHistory() {
   const body = $('history-body'); if (!body) return;
   body.innerHTML = '';
   $('history').hidden = history.length === 0;
+  // legend from the most recent row
+  const leg = $('history-legend');
+  if (leg) {
+    const r0 = history[0];
+    if (r0 && r0.boats) {
+      const c = r0.colors || ['#8fb0c4', '#8fb0c4'];
+      leg.innerHTML = r0.boats.map((n, i) => `<span class="legdot" style="background:${c[i]}"></span>${n}`).join('<span class="leggap"></span>');
+    } else leg.innerHTML = '';
+  }
   for (const r of history) {
     const tr = document.createElement('tr');
-    const cells = [
-      fmtDateTime(r.startTs), r.type, mmss(r.durationSec), r.winner,
-      r.rate == null ? '—' : `${num(r.rate, 1)} m/min`,
-      num(r.fwd, 0), num(r.up, 0),
-      ...AVG_CH.map((ch) => avgCell(r, ch.key, ch.dp)),
-    ];
-    for (const c of cells) { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); }
+    const winnerColor = r.colors && r.boats ? (r.winner === r.boats[0] ? r.colors[0] : r.winner === r.boats[1] ? r.colors[1] : '') : '';
+    const add = (html) => { const td = document.createElement('td'); td.innerHTML = html; tr.appendChild(td); };
+    const esc = (s) => String(s).replace(/</g, '&lt;');
+    add(esc(fmtDateTime(r.startTs)));
+    add(esc(r.type));
+    add(esc(mmss(r.durationSec)));
+    add(winnerColor ? `<b style="color:${winnerColor}">${esc(r.winner)}</b>` : esc(r.winner));
+    add(r.rate == null ? '—' : `${num(r.rate, 1)} m/min`);
+    add(num(r.fwd, 0));
+    add(num(r.up, 0));
+    for (const ch of AVG_CH) add(avgCellHTML(r, ch.key, ch.dp));
     body.appendChild(tr);
   }
 }

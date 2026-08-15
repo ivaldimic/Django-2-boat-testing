@@ -89,6 +89,13 @@ boats.forEach((b) => {
     console.log(`${b.name}: app connected (${b.wss.clients.size} on port ${b.port})`);
     // Relay a client's message to the other clients on this boat (master → viewers sync).
     ws.on('message', (data, isBinary) => {
+      const s = data.toString();
+      if (s.startsWith('{')) {
+        try {
+          const m = JSON.parse(s);
+          if (m && m.kind === 'waypoint') { console.log(`${b.name}: waypoint for Expedition → ${m.name} ${(+m.lat).toFixed(5)}, ${(+m.lon).toFixed(5)}`); return; }
+        } catch (_) {}
+      }
       for (const c of b.wss.clients) if (c !== ws && c.readyState === 1) c.send(data, { binary: isBinary });
     });
     ws.on('close', () => console.log(`${b.name}: app disconnected (${b.wss.clients.size} on port ${b.port})`));
