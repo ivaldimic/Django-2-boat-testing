@@ -1091,7 +1091,32 @@ document.querySelector('.streams-wrap').addEventListener('toggle', (e) => {
   }
 });
 
+/* ---------- cloud config via URL (?relay=…&room=…&token=…&role=viewer) -------
+ * Lets you share one link that connects a viewer straight to the cloud relay.
+ * With no ?relay, defaults to this page's own origin (so hosting the app on the
+ * relay itself needs only ?role & ?token). */
+function applyCloudParams() {
+  const q = new URLSearchParams(location.search);
+  const hasRelay = q.has('relay') || q.has('token') || q.has('room');
+  if (hasRelay) {
+    let base = q.get('relay');
+    if (!base) base = location.origin.replace(/^http/, 'ws');   // same host as the app
+    base = base.replace(/^http/, 'ws').replace(/\/+$/, '');
+    const room = q.get('room') || 'default';
+    const token = q.get('token') || '';
+    const mk = (boat) => `${base}/ws?role=view&room=${encodeURIComponent(room)}&token=${encodeURIComponent(token)}&boat=${boat}`;
+    const boats = loadBoats();
+    if (boats[0]) boats[0] = { ...boats[0], url: mk('1') };
+    if (boats[1]) boats[1] = { ...boats[1], url: mk('2') };
+    saveBoats(boats);
+  }
+  const role = (q.get('role') || '').toLowerCase();
+  if (role === 'viewer' || role === 'view') saveRole('viewer');
+  else if (role === 'master') saveRole('master');
+}
+
 /* ---------- init ---------- */
+applyCloudParams();
 applyBoats(loadBoats());
 loadHistory();
 renderHistory();

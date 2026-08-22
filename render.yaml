@@ -1,0 +1,19 @@
+# Render Blueprint — deploys the cloud relay that also serves the web app.
+# In Render: New +  →  Blueprint  →  pick this repo. Render reads this file.
+# After the first deploy, open the service's Environment tab and copy the two
+# generated tokens (VIEW_TOKEN, PUBLISH_TOKEN) — you'll paste them into the boat
+# bridges and the viewer links (see DEPLOY.md).
+services:
+  - type: web
+    name: boat-relay
+    env: node
+    plan: free            # works for testing; use "starter" to avoid idle spin-down on race days
+    buildCommand: cd relay && npm install
+    startCommand: node relay/server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: VIEW_TOKEN
+        generateValue: true      # secret for apps (master + viewers), read-only
+      - key: PUBLISH_TOKEN
+        generateValue: true      # secret for the boats (bridges), publish rights

@@ -17,7 +17,7 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { WebSocketServer } = require('ws');
+const { WebSocketServer, WebSocket } = require('ws');
 
 // ---- Config ---------------------------------------------------------------
 const CONFIG_PATH = path.join(__dirname, 'config.json');
@@ -123,8 +123,9 @@ udp.on('message', (buf, rinfo) => {
     firstPacket = false;
     console.log(`Receiving UDP from Expedition (${rinfo.address}:${rinfo.port}) — forwarding to the web app.`);
   }
-  // Forward the datagram as-is; the web app splits it into individual sentences.
-  broadcast(buf.toString('utf8'));
+  const text = buf.toString('utf8');
+  broadcast(text);           // LAN clients
+  uplinkSend(text);          // cloud relay (if configured)
 });
 
 udp.on('error', (err) => console.error(`UDP error: ${err.message}`));
@@ -132,6 +133,35 @@ udp.on('listening', () => {
   try { udp.setBroadcast(true); } catch (_) {}
 });
 udp.bind(udpPort);
+
+// ---- Optional cloud uplink (for boats on separate Starlink/5G networks) ----
+// Configure `relay` in config.json: { "url":"wss://host", "room":"team",
+// "token":"<PUBLISH_TOKEN>", "boat":"1" }. The bridge connects OUTBOUND to the
+// relay, pushes this boat's NMEA up, and forwards any waypoint it receives to
+// Expedition — no inbound ports or port-forwarding needed.
+let uplink = null;
+function uplinkSend(text) { if (uplink && uplink.readyState === 1) { try { uplink.send(text); } catch (_) {} } }
+function startUplink() {
+  const rc = config.relay;
+  if (!rc || !rc.url) return;
+  const base = String(rc.url).replace(/^http/, 'ws').replace(/\/+$/, '');
+  const wsUrl = `${base}/ws?role=pub&room=${encodeURIComponent(rc.room || 'default')}&boat=${encodeURIComponent(rc.boat || '1')}&token=${encodeURIComponent(rc.token || '')}`;
+  const connect = () => {
+    console.log(`Uplink: connecting to relay as boat ${rc.boat || '1'} …`);
+    uplink = new WebSocket(wsUrl);
+    uplink.on('open', () => console.log('Uplink: connected to cloud relay.'));
+    uplink.on('message', (data) => {
+      const s = data.toString();
+      if (s.startsWith('{')) {
+        try { const m = JSON.parse(s); if (m && m.kind === 'waypoint' && Number.isFinite(m.lat) && Number.isFinite(m.lon)) sendWaypointToExpedition(m); } catch (_) {}
+      }
+    });
+    uplink.on('close', () => { console.log('Uplink: disconnected — retrying in 3s.'); setTimeout(connect, 3000); });
+    uplink.on('error', (e) => console.log(`Uplink error: ${e.message}`));
+  };
+  connect();
+}
+startUplink();
 
 // ---- Start ----------------------------------------------------------------
 function lanIps() {
