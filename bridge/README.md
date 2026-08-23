@@ -6,8 +6,32 @@ to. It also serves the web app itself over http, so any device on the network
 can open it with no extra hosting.
 
 ```
-Expedition ──UDP→ 127.0.0.1:5555 ──► bridge ──ws://this-pc:8080──► web app
+Expedition ──UDP tx 5556──► bridge ──ws://this-pc:8080──► web app
+web app ──waypoint──► bridge ──UDP 5555──► Expedition
 ```
+
+## Expedition network setup (important — avoids the UDP port clash)
+
+Two programs on one PC can't both *open* the same UDP port, so Expedition and the
+bridge must sit on **different ports**. Expedition's **"Tx on port + 1"** option
+does exactly this: it receives on its network port and transmits on that port + 1.
+
+In Expedition → the UDP **Network** connection:
+- Connection **UDP**, Address **127.0.0.1**, Port **5555**
+- tick **"Tx on port + 1"**  → Expedition transmits on **5556**, receives on **5555**
+- (in **NMEA 0183 settings**, enable RMC/GLL, HDT, MWD, MWV, VHW so the app gets
+  position, heading, wind and boat speed)
+
+The bridge then listens on **5556** (Expedition's transmit) and sends the test
+waypoints back on **5555** (Expedition's receive) — matching `config.json`:
+
+```json
+{ "udpPort": 5556, "port": 8080, "serveWebApp": true,
+  "expedition": { "host": "127.0.0.1", "port": 5555 } }
+```
+
+Because the two use different ports, **the start order no longer matters** — no
+more "can't attach" if one is already running.
 
 ## Install (once per boat PC — Windows)
 

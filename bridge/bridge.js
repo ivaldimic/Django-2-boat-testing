@@ -180,7 +180,8 @@ httpServer.listen(port, () => {
   console.log('');
   console.log('  Expedition bridge is running on this PC.');
   console.log('');
-  console.log(`  1. In Expedition, send UDP to  127.0.0.1  on port ${udpPort}`);
+  console.log(`  1. In Expedition (UDP network on 127.0.0.1:5555), tick "Tx on port + 1" so it transmits on ${udpPort}.`);
+  console.log(`     (Waypoints are sent back to Expedition on ${exp.port || '<set expedition.port>'}.)`);
   console.log(`  2. In the web app, set this boat's address to:`);
   for (const ip of ips) console.log(`         ws://${ip}:${port}`);
   if (serveWebApp) {

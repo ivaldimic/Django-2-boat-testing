@@ -1,15 +1,20 @@
 @echo off
-REM Double-click to start the Expedition bridge on this PC.
 cd /d "%~dp0"
-where node >nul 2>nul
-if errorlevel 1 (
-  echo Node.js is not installed. Get it from https://nodejs.org (LTS), then run this again.
-  pause
-  exit /b 1
-)
-if not exist node_modules (
-  echo Installing dependencies (first run only)...
-  call npm install
-)
+title Expedition bridge
+echo Starting the Expedition bridge...
+echo.
+where node >nul 2>nul || goto NONODE
+if exist node_modules goto RUN
+echo Installing dependencies (first run only)...
+call npm install
+:RUN
 node bridge.js
+echo.
+echo Bridge stopped. You can close this window.
 pause
+goto END
+:NONODE
+echo Node.js is not installed. Install the LTS version from https://nodejs.org
+echo then run this again.
+pause
+:END
