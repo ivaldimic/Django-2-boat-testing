@@ -2,9 +2,9 @@
  * Offline-safe (no CDN) so it runs on a nav PC with no internet. */
 (function (root) {
   const CSS = {
-    grid: 'rgba(120,170,200,0.14)',
-    axis: 'rgba(120,170,200,0.35)',
-    text: '#7f9bb0',
+    grid: 'rgba(30,55,80,0.10)',
+    axis: 'rgba(30,55,80,0.28)',
+    text: '#7a8a99',
   };
 
   function niceTime(sec) {
@@ -179,7 +179,7 @@
         has = true; if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y;
       }
       if (!has) {
-        ctx.fillStyle = '#4d6a80'; ctx.font = '11px system-ui, sans-serif';
+        ctx.fillStyle = '#8b9aa8'; ctx.font = '11px system-ui, sans-serif';
         ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
         ctx.fillText('no data', mL, H / 2);
         return;
@@ -192,12 +192,12 @@
 
       // y labels (min/max)
       ctx.font = '10px ui-monospace, Menlo, monospace';
-      ctx.fillStyle = '#4d6a80'; ctx.textAlign = 'right';
+      ctx.fillStyle = '#8b9aa8'; ctx.textAlign = 'right';
       ctx.textBaseline = 'top'; ctx.fillText(yMax.toFixed(0), mL - 4, mT);
       ctx.textBaseline = 'bottom'; ctx.fillText(yMin.toFixed(0), mL - 4, H - mB);
 
       // baseline grid
-      ctx.strokeStyle = 'rgba(120,170,200,0.10)';
+      ctx.strokeStyle = 'rgba(30,55,80,0.08)';
       ctx.beginPath(); ctx.moveTo(mL, mT + ph / 2); ctx.lineTo(W - mR, mT + ph / 2); ctx.stroke();
 
       const angular = this.opts.angular;

@@ -4,11 +4,11 @@
  * drag) with a Fit reset. No tiles, no network. */
 (function (root) {
   const CSS = {
-    grid: 'rgba(120,170,200,0.10)',
-    axis: 'rgba(120,170,200,0.5)',
-    text: '#7f9bb0',
-    faint: '#4d6a80',
-    mark: '#ffd166',
+    grid: 'rgba(30,55,80,0.09)',
+    axis: 'rgba(30,55,80,0.4)',
+    text: '#5a6b7a',
+    faint: '#9aa7b3',
+    mark: '#d98a00',
   };
   const LAT_M = 111132;
 
@@ -182,8 +182,8 @@
           const label = `${Math.round(this.data.range)} m` + (this.data.bearing != null ? `  ${String(Math.round(this.data.bearing)).padStart(3, '0')}°` : '');
           ctx.font = '11px ui-monospace, Menlo, monospace';
           const w = ctx.measureText(label).width;
-          ctx.fillStyle = 'rgba(8,21,33,0.85)'; ctx.fillRect(mx - w / 2 - 5, my - 9, w + 10, 18);
-          ctx.fillStyle = '#dceaf4'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, mx, my);
+          ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(mx - w / 2 - 5, my - 9, w + 10, 18);
+          ctx.fillStyle = '#1c2b38'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, mx, my);
         }
       }
 
@@ -196,7 +196,7 @@
           ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.sin(r) * 16, p.y - Math.cos(r) * 16); ctx.stroke();
         }
         ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#dceaf4'; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#1c2b38'; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
         ctx.fillText(b.name, p.x + 8, p.y - 6);
       }
 

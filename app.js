@@ -9,7 +9,7 @@ const ROLE_KEY = 'boat-receiver:role:v1';
 const MAX_LINES = 120;
 const LIVE_MS = 3000;
 const RECONNECT_MAX_MS = 8000;
-const COLORS = ['#37e0cf', '#ff8a5b', '#c084fc', '#7dd3fc'];
+const COLORS = ['#0d9488', '#ea580c', '#7c3aed', '#0369a1'];
 const STRIP_WINDOW_MS = 120000;   // default strip window (2 minutes)
 const HIST_MS = 1210000;          // keep ~20 min so the 20-minute window works
 const TRACK_MS = 600000;          // keep up to 10 minutes of track
@@ -858,12 +858,28 @@ function renderTest() {
     };
   }
 
-  if (chartVMG) chartVMG.setSeries([{ label: `${primaryLabel} gain`, color: '#37e0cf', points: g.series.primary }], { xMax: t.durationSec, includeZero: true });
+  if (chartVMG) chartVMG.setSeries([{ label: `${primaryLabel} gain`, color: '#0d9488', points: g.series.primary }], { xMax: t.durationSec, includeZero: true });
   if (chartUP) {
-    const s = [{ label: 'UP/DOWN', color: '#37e0cf', points: g.series.up }];
-    if (t.type === 'VMG') s.push({ label: 'FWD/BACK', color: '#ff8a5b', points: g.series.fwd });
+    const s = [{ label: 'UP/DOWN', color: '#0d9488', points: g.series.up }];
+    if (t.type === 'VMG') s.push({ label: 'FWD/BACK', color: '#ea580c', points: g.series.fwd });
     chartUP.setSeries(s, { xMax: t.durationSec, includeZero: true });
   }
+
+  renderTestAverages(t);
+}
+
+// A row of boxes with each variable's average since the test started (per boat).
+function renderTestAverages(t) {
+  const el = $('test-averages'); if (!el) return;
+  const avg = computeTestAverages(t);
+  el.innerHTML = AVG_CH.map((ch) => {
+    const cells = t.boats.map((b, i) => {
+      const v = avg[i] && avg[i][ch.key];
+      const txt = (v == null || Number.isNaN(v)) ? '—' : (+v).toFixed(ch.dp);
+      return `<span class="tavg__v" style="color:${b.color}">${txt}</span>`;
+    }).join('<span class="tavg__sep">/</span>');
+    return `<div class="tavg__box"><span class="tavg__label">${ch.label}</span><div class="tavg__vals">${cells}</div></div>`;
+  }).join('');
 }
 
 function setDelta(key, value, unit, sub, dp, blank) {
