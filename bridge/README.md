@@ -58,8 +58,9 @@ In Expedition, open **Instruments** (Ctrl+I → *Serial and Network Ports*) and 
 an outgoing connection:
 
 - **Instruments:** NMEA 0183
-- **Connection:** *UDP to IP address* → address `127.0.0.1`, port `5555`
-  (matches `udpPort` in `config.json`)
+- **Connection:** *UDP to IP address* → address `127.0.0.1`, port `5555`, with
+  **"Tx on port + 1"** ticked, so Expedition transmits on `5556` (matches
+  `udpPort` in `config.json`)
 - **NMEA 0183 settings:** tick the sentences to send (position, speed, wind,
   heading — or tick everything; the app shows all of it)
 - **OK** and save the Expedition settings.
@@ -78,9 +79,13 @@ both at once, so it doesn't matter which boat's bridge served the page.
 
 ```json
 {
-  "udpPort": 5555,      // port Expedition sends UDP to on this PC
+  "udpPort": 5556,      // port Expedition transmits UDP on (its port + 1)
   "port": 8080,         // port the web app uses (both the http page and ws://)
-  "serveWebApp": true   // also serve the web app over http on the same port
+  "serveWebApp": true,  // also serve the web app over http on the same port
+  "expedition": {       // where test waypoints are sent (Expedition's receive port)
+    "host": "127.0.0.1",
+    "port": 5555
+  }
 }
 ```
 
