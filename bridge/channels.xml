@@ -1,0 +1,416 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channels version="1.0" creator="Expedition - https://www.ExpeditionMarine.com">
+  <channel id="1" name="BSP" log="true" damp="0" prec="2" />
+  <channel id="2" name="AWA" log="true" damp="0" prec="0" />
+  <channel id="3" name="AWS" log="true" damp="0" prec="1" />
+  <channel id="4" name="TWA" log="true" damp="0" prec="0" />
+  <channel id="5" name="TWS" log="true" damp="0" prec="1" />
+  <channel id="6" name="TWD" log="true" damp="0" prec="0" />
+  <channel id="7" name="RudderFwd" log="true" damp="0" prec="1" />
+  <channel id="8" name="dTargBsp" log="false" damp="0" prec="2" />
+  <channel id="9" name="Course" log="true" damp="0" prec="0" />
+  <channel id="10" name="Leeway" log="true" damp="0" prec="1" />
+  <channel id="11" name="Set" log="true" damp="0" prec="0" />
+  <channel id="12" name="Drift" log="true" damp="0" prec="1" />
+  <channel id="13" name="HDG" log="true" damp="0" prec="0" />
+  <channel id="14" name="AirTemp" log="true" damp="0" prec="1" />
+  <channel id="15" name="SeaTemp" log="true" damp="0" prec="1" />
+  <channel id="16" name="Baro" log="true" damp="0" prec="2" />
+  <channel id="17" name="Depth" log="true" damp="0" prec="1" />
+  <channel id="18" name="Heel" log="true" damp="0" prec="1" />
+  <channel id="19" name="Trim" log="true" damp="0" prec="1" />
+  <channel id="20" name="Rudder" log="true" damp="0" prec="1" />
+  <channel id="21" name="Tab" log="true" damp="0" prec="1" />
+  <channel id="22" name="Forestay" log="true" damp="0" prec="2" />
+  <channel id="23" name="Downhaul" log="false" damp="0" prec="2" />
+  <channel id="24" name="MastAng" log="true" damp="0" prec="1" />
+  <channel id="25" name="FStayLen" log="true" damp="0" prec="2" />
+  <channel id="26" name="MastButt" log="true" damp="0" prec="2" />
+  <channel id="27" name="Load S" log="true" damp="0" prec="2" />
+  <channel id="28" name="Load P" log="true" damp="0" prec="2" />
+  <channel id="29" name="Rake" log="true" damp="0" prec="2" />
+  <channel id="30" name="Volts" log="false" damp="0" prec="1" />
+  <channel id="31" name="VMG" log="false" damp="0" prec="1" />
+  <channel id="32" name="ROT" log="true" damp="0" prec="1" />
+  <channel id="33" name="Dt on S" log="false" prec="2" />
+  <channel id="34" name="Tm on S" log="false" />
+  <channel id="35" name="Brg on P" log="false" prec="0" />
+  <channel id="36" name="Dt on P" log="false" prec="2" />
+  <channel id="37" name="Tm on P" log="false" />
+  <channel id="38" name="Brg on S" log="false" prec="0" />
+  <channel id="39" name="GpsMethod" log="true" prec="0" />
+  <channel id="40" name="HDOP" log="false" prec="1" />
+  <channel id="41" name="PDOP" log="true" prec="1" />
+  <channel id="42" name="VDOP" log="false" prec="1" />
+  <channel id="43" name="GpsNum" log="true" prec="0" />
+  <channel id="44" name="GpsAge" log="true" />
+  <channel id="45" name="Altitude" log="true" damp="0" prec="1" />
+  <channel id="46" name="GeoSep" log="true" damp="0" prec="1" />
+  <channel id="47" name="GpsMode" log="true" prec="1" />
+  <channel id="48" name="Lat" log="true" />
+  <channel id="49" name="Lon" log="true" />
+  <channel id="50" name="COG" log="true" damp="0" prec="0" />
+  <channel id="51" name="SOG" log="true" damp="0" prec="2" />
+  <channel id="52" name="DiffStn" log="false" prec="0" />
+  <channel id="53" name="TargTwaN" log="false" damp="0" prec="0" />
+  <channel id="54" name="TargBspN" log="false" damp="0" prec="2" />
+  <channel id="55" name="TargVmg" log="false" damp="0" prec="1" />
+  <channel id="56" name="TargHeel" log="false" damp="0" prec="1" />
+  <channel id="57" name="PolBsp" log="false" damp="0" prec="2" />
+  <channel id="58" name="PolBsp%" log="true" damp="0" prec="1" />
+  <channel id="59" name="PolHeel" log="false" damp="0" prec="1" />
+  <channel id="60" name="Error" log="false" prec="2" />
+  <channel id="61" name="RunnerS" log="true" damp="0" prec="2" />
+  <channel id="62" name="RunnerP" log="true" damp="0" prec="2" />
+  <channel id="63" name="PolBspN" log="false" damp="0" prec="2" />
+  <channel id="64" name="PolBspN%" log="false" damp="0" prec="1" />
+  <channel id="65" name="TrgTwa-L" log="false" damp="0" prec="0" />
+  <channel id="66" name="VMG%" log="false" damp="0" prec="1" />
+  <channel id="67" name="Vang" log="true" damp="0" prec="2" />
+  <channel id="68" name="Trav" log="true" damp="0" prec="2" />
+  <channel id="69" name="Main" log="true" damp="0" prec="2" />
+  <channel id="70" name="VmcPolMk" log="false" prec="1" />
+  <channel id="71" name="KeelAng" log="false" damp="0" prec="1" />
+  <channel id="72" name="KeelHt" log="false" damp="0" prec="2" />
+  <channel id="73" name="Board" log="false" damp="0" prec="2" />
+  <channel id="74" name="EngOilPres" log="false" damp="0" prec="2" />
+  <channel id="75" name="RPM 1" log="true" damp="0" prec="1" />
+  <channel id="76" name="RPM 2" log="true" damp="0" prec="1" />
+  <channel id="77" name="Board P" log="false" damp="0" prec="2" />
+  <channel id="78" name="Board S" log="false" damp="0" prec="2" />
+  <channel id="79" name="OppTrack" log="false" damp="0" prec="0" />
+  <channel id="80" name="d Finish" log="false" prec="2" />
+  <channel id="81" name="StTmToP" log="false" />
+  <channel id="82" name="StTmToS" log="false" />
+  <channel id="83" name="LnSqWind" log="false" damp="0" prec="0" />
+  <channel id="84" name="DistToLn" log="true" prec="2" />
+  <channel id="85" name="RchTmToLn" log="true" />
+  <channel id="86" name="RchDtToLn" log="true" prec="2" />
+  <channel id="87" name="RchBsToLn" log="false" prec="2" />
+  <channel id="88" name="Mark Tm" log="false" />
+  <channel id="89" name="TmNxMk P" log="false" />
+  <channel id="90" name="TmNxMk S" log="false" />
+  <channel id="91" name="XTE" log="false" prec="2" />
+  <channel id="92" name="VMC" log="false" damp="0" prec="1" />
+  <channel id="93" name="MagVar" log="true" prec="2" />
+  <channel id="94" name="GWD" log="false" damp="0" prec="0" />
+  <channel id="95" name="GWS" log="false" damp="0" prec="1" />
+  <channel id="96" name="LayDist" log="false" prec="2" />
+  <channel id="97" name="LayTime" log="false" />
+  <channel id="98" name="LayBrg" log="false" prec="0" />
+  <channel id="99" name="VMC%" log="false" damp="0" prec="1" />
+  <channel id="100" name="VmcPol" log="false" damp="0" prec="1" />
+  <channel id="101" name="VmcOpt" log="false" damp="0" prec="1" />
+  <channel id="102" name="VmcOptHdg" log="false" damp="0" prec="0" />
+  <channel id="103" name="VmcOptTwa" log="false" damp="0" prec="0" />
+  <channel id="104" name="dTargTwa" log="false" damp="0" prec="0" />
+  <channel id="105" name="MkRng" log="false" prec="2" />
+  <channel id="106" name="MkBrg" log="false" prec="0" />
+  <channel id="107" name="MkGpsTime" log="false" damp="0" />
+  <channel id="108" name="MkTwa" log="false" damp="0" prec="0" />
+  <channel id="109" name="PredSet" log="true" prec="0" />
+  <channel id="110" name="PredDrift" log="true" prec="1" />
+  <channel id="111" name="NxtMkRng" log="false" prec="2" />
+  <channel id="112" name="NxtMkBrg" log="false" prec="0" />
+  <channel id="113" name="NxtMkTwa" log="false" damp="0" prec="0" />
+  <channel id="114" name="RadarRng" log="false" prec="2" />
+  <channel id="115" name="RadarBrg" log="false" prec="0" />
+  <channel id="116" name="BlwLnStrn" log="false" prec="2" />
+  <channel id="117" name="Alt 0" log="false" damp="0" />
+  <channel id="118" name="Alt 1" log="false" damp="0" />
+  <channel id="119" name="Alt 2" log="false" damp="0" />
+  <channel id="120" name="Alt 3" log="false" damp="0" />
+  <channel id="121" name="Alt 4" log="false" damp="0" />
+  <channel id="122" name="Alt 5" log="false" damp="0" />
+  <channel id="123" name="Alt 6" log="false" damp="0" />
+  <channel id="124" name="Alt 7" log="false" damp="0" />
+  <channel id="125" name="Alt 8" log="false" damp="0" />
+  <channel id="126" name="Alt 9" log="false" damp="0" />
+  <channel id="127" name="NxMkPolTm" log="false" />
+  <channel id="128" name="Bias ang" log="false" damp="0" prec="0" />
+  <channel id="129" name="BiasL" log="false" damp="0" prec="2" />
+  <channel id="130" name="St lay P" log="false" damp="0" prec="0" />
+  <channel id="131" name="St lay S" log="false" damp="0" prec="0" />
+  <channel id="132" name="NxtMkAwa" log="false" damp="0" prec="0" />
+  <channel id="133" name="NxtMkAws" log="false" damp="0" prec="1" />
+  <channel id="134" name="StbdTurnR" log="false" />
+  <channel id="135" name="PortTurnR" log="false" />
+  <channel id="136" name="StbdTurnL" log="false" />
+  <channel id="137" name="PortTurnL" log="false" />
+  <channel id="138" name="Dt note" log="false" prec="2" />
+  <channel id="139" name="Tm note" log="false" />
+  <channel id="140" name="Log Bsp" log="false" prec="3" />
+  <channel id="141" name="Log Sog" log="false" prec="3" />
+  <channel id="142" name="GpsTmToLn" log="false" />
+  <channel id="143" name="GpsTmToBn" log="false" damp="0" />
+  <channel id="144" name="TargTwaS" log="false" damp="0" prec="0" />
+  <channel id="145" name="TargBspS" log="false" damp="0" prec="2" />
+  <channel id="146" name="GPS time" log="true" />
+  <channel id="147" name="TWD+90" log="false" damp="0" prec="0" />
+  <channel id="148" name="TWD-90" log="false" damp="0" prec="0" />
+  <channel id="149" name="Shadow" log="false" damp="0" prec="0" />
+  <channel id="150" name="ShadowOpp" log="false" damp="0" prec="0" />
+  <channel id="151" name="Downhaul2" log="true" damp="0" prec="2" />
+  <channel id="152" name="Tack Ang" log="false" damp="0" prec="0" />
+  <channel id="153" name="TackAngPl" log="false" damp="0" prec="0" />
+  <channel id="154" name="TargAwa" log="false" damp="0" prec="0" />
+  <channel id="155" name="Px burn" log="false" damp="0" />
+  <channel id="156" name="Sx burn" log="false" damp="0" />
+  <channel id="157" name="StTmLayP" log="false" />
+  <channel id="158" name="StTmLayS" log="false" />
+  <channel id="159" name="Mk Set" log="false" prec="0" />
+  <channel id="160" name="Mk Drift" log="false" prec="2" />
+  <channel id="161" name="Mk Lat" log="true" />
+  <channel id="162" name="Mk Lon" log="true" />
+  <channel id="163" name="Port lat" log="true" />
+  <channel id="164" name="Port lon" log="true" />
+  <channel id="165" name="Stbd lat" log="true" />
+  <channel id="166" name="Stbd lon" log="true" />
+  <channel id="167" name="HPE" log="true" prec="1" />
+  <channel id="168" name="RH" log="true" damp="0" prec="0" />
+  <channel id="169" name="Lead P" log="true" damp="0" prec="2" />
+  <channel id="170" name="Lead S" log="true" damp="0" prec="2" />
+  <channel id="171" name="BackStay" log="true" damp="0" prec="2" />
+  <channel id="172" name="User 0" log="true" damp="0" type="0" user="" />
+  <channel id="173" name="User 1" log="true" damp="0" prec="1" type="0" user="PLC_JibCunPres" />
+  <channel id="174" name="User 2" log="true" damp="0" prec="1" type="0" user="PLC_JibUpDnPtPres" />
+  <channel id="175" name="User 3" log="true" damp="0" prec="1" type="0" user="PLC_JibInOutPres" />
+  <channel id="176" name="User 4" log="true" damp="0" prec="1" type="0" user="PLC_LowDefPres" />
+  <channel id="177" name="User 5" log="true" damp="0" prec="1" type="0" user="PLC_UpDefPres" />
+  <channel id="178" name="User 6" log="true" damp="0" prec="1" type="0" user="PLC_JibUpDnStPres" />
+  <channel id="179" name="User 7" log="true" damp="0" prec="3" type="0" user="PLC_JibCunLoad" />
+  <channel id="180" name="User 8" log="true" damp="0" prec="3" type="0" user="PLC_JibUpDnPtLoad" />
+  <channel id="181" name="User 9" log="true" damp="0" prec="3" type="0" user="PLC_JibInOutLoad" />
+  <channel id="182" name="User 10" log="true" damp="0" prec="3" type="0" user="PLC_LowDefLoad" />
+  <channel id="183" name="User 11" log="true" damp="0" prec="3" type="0" user="PLC_UpDefLoad" />
+  <channel id="184" name="User 12" log="true" damp="0" prec="3" type="0" user="PLC_JibUpDnStLoad" />
+  <channel id="185" name="User 13" log="true" damp="0" prec="1" type="0" user="PLC_EBarDist_mm" />
+  <channel id="186" name="User 14" log="true" damp="0" prec="1" type="0" user="PLC_EbarToe_deg" />
+  <channel id="187" name="User 15" log="true" damp="0" prec="3" type="0" user="CYC_JibTack" />
+  <channel id="188" name="User 16" log="true" damp="0" type="0" user="" />
+  <channel id="189" name="User 17" log="true" damp="0" type="0" user="" />
+  <channel id="190" name="User 18" log="true" damp="0" type="0" user="" />
+  <channel id="191" name="User 19" log="true" damp="0" type="0" user="" />
+  <channel id="192" name="User 20" log="true" damp="0" type="0" user="" />
+  <channel id="193" name="User 21" log="true" damp="0" type="0" user="" />
+  <channel id="194" name="User 22" log="true" damp="0" type="0" user="" />
+  <channel id="195" name="User 23" log="true" damp="0" type="0" user="" />
+  <channel id="196" name="User 24" log="true" damp="0" type="0" user="" />
+  <channel id="197" name="User 25" log="true" damp="0" type="0" user="" />
+  <channel id="198" name="User 26" log="true" damp="0" type="0" user="" />
+  <channel id="199" name="User 27" log="true" damp="0" type="0" user="" />
+  <channel id="200" name="User 28" log="true" damp="0" type="0" user="" />
+  <channel id="201" name="User 29" log="true" damp="0" type="0" user="" />
+  <channel id="202" name="User 30" log="true" damp="0" type="0" user="" />
+  <channel id="203" name="User 31" log="true" damp="0" type="0" user="" />
+  <channel id="204" name="TmToGun" log="true" />
+  <channel id="205" name="TmToLn" log="true" />
+  <channel id="206" name="Burn" log="true" damp="0" />
+  <channel id="207" name="BelowLn" log="true" prec="2" />
+  <channel id="208" name="GunBlwLn" log="true" prec="2" />
+  <channel id="209" name="GtTmOnPt" log="false" />
+  <channel id="210" name="GtDtOnSt" log="false" prec="2" />
+  <channel id="211" name="GtTmOnSt" log="false" />
+  <channel id="212" name="GtDtOnPt" log="false" prec="2" />
+  <channel id="213" name="GSTmOnSb" log="false" />
+  <channel id="214" name="GSTmOnPt" log="false" />
+  <channel id="215" name="PrtUpBrg" log="false" prec="0" />
+  <channel id="216" name="StbUpBrg" log="false" prec="0" />
+  <channel id="217" name="PrtDnBrg" log="false" prec="0" />
+  <channel id="218" name="StbDnBrg" log="false" prec="0" />
+  <channel id="219" name="Td L Pt" log="false" />
+  <channel id="220" name="Td L Stb" log="false" />
+  <channel id="221" name="Td R Prt" log="false" />
+  <channel id="222" name="Td R Stb" log="false" />
+  <channel id="223" name="Td L Tm" log="false" />
+  <channel id="224" name="Td R Tm" log="false" />
+  <channel id="225" name="PrtBrgMax" log="false" prec="0" />
+  <channel id="226" name="PrtBrgMin" log="false" prec="0" />
+  <channel id="227" name="StbBrgMax" log="false" prec="0" />
+  <channel id="228" name="StbBrgMin" log="false" prec="0" />
+  <channel id="229" name="MkLyTwd" log="false" damp="0" prec="0" />
+  <channel id="230" name="MkLyTwdOp" log="false" damp="0" prec="0" />
+  <channel id="231" name="dBspSog" log="true" damp="0" prec="2" />
+  <channel id="232" name="dHdgCog" log="true" damp="0" prec="1" />
+  <channel id="233" name="rTmOnPrt" log="false" damp="0" prec="1" />
+  <channel id="234" name="rTmOnStb" log="false" damp="0" prec="1" />
+  <channel id="235" name="TWDPeriod" log="false" />
+  <channel id="236" name="TWSPeriod" log="false" />
+  <channel id="237" name="Targ Twa" log="true" damp="0" prec="0" />
+  <channel id="238" name="Targ Bsp" log="true" damp="0" prec="2" />
+  <channel id="239" name="Tide" log="false" prec="2" />
+  <channel id="240" name="Pol 0" log="false" damp="0" prec="2" />
+  <channel id="241" name="Pol 1" log="false" damp="0" prec="2" />
+  <channel id="242" name="Pol 2" log="false" damp="0" prec="2" />
+  <channel id="243" name="Pol 3" log="false" damp="0" prec="2" />
+  <channel id="244" name="Pol 0%" log="false" damp="0" prec="1" />
+  <channel id="245" name="Pol 1%" log="false" damp="0" prec="1" />
+  <channel id="246" name="Pol 2%" log="false" damp="0" prec="1" />
+  <channel id="247" name="Pol 3%" log="false" damp="0" prec="1" />
+  <channel id="248" name="Pol0Targ" log="false" damp="0" prec="1" />
+  <channel id="249" name="Pol1Targ" log="false" damp="0" prec="1" />
+  <channel id="250" name="Pol2Targ" log="false" damp="0" prec="1" />
+  <channel id="251" name="Pol3Targ" log="false" damp="0" prec="1" />
+  <channel id="252" name="WvSigHt" log="true" prec="1" />
+  <channel id="253" name="WvSigPd" log="true" prec="1" />
+  <channel id="254" name="WvMaxHt" log="true" prec="1" />
+  <channel id="255" name="WvMaxPd" log="true" prec="1" />
+  <channel id="256" name="GPS tOffset" log="true" />
+  <channel id="257" name="Heave" log="true" damp="0" prec="1" />
+  <channel id="258" name="MWA" log="true" damp="0" prec="0" />
+  <channel id="259" name="MWS" log="true" damp="0" prec="1" />
+  <channel id="260" name="Boom" log="false" damp="0" prec="2" />
+  <channel id="261" name="TargBsp%" log="false" damp="0" prec="1" />
+  <channel id="262" name="Hdg2St" log="false" damp="0" prec="0" />
+  <channel id="263" name="Hdg2StPol" log="false" damp="0" prec="0" />
+  <channel id="264" name="StBsToP" log="false" prec="2" />
+  <channel id="265" name="StBsToS" log="false" prec="2" />
+  <channel id="266" name="StBsOnP" log="false" prec="2" />
+  <channel id="267" name="StBsOnS" log="false" prec="2" />
+  <channel id="268" name="Twist" log="true" prec="0" />
+  <channel id="269" name="Sail" log="true" />
+  <channel id="270" name="SailMark" log="false" />
+  <channel id="271" name="SailNext" log="false" />
+  <channel id="272" name="TWDTwisted" log="true" damp="0" prec="0" />
+  <channel id="273" name="TackLossT" log="true" />
+  <channel id="274" name="TackLossD" log="true" prec="1" />
+  <channel id="275" name="TripLog" log="false" prec="2" />
+  <channel id="276" name="dMkBrgCog" log="false" damp="0" prec="0" />
+  <channel id="277" name="TrimRate" log="true" prec="1" />
+  <channel id="278" name="HeelRate" log="true" prec="1" />
+  <channel id="279" name="dPolBsp" log="false" damp="0" prec="2" />
+  <channel id="280" name="dTargHeel" log="false" damp="0" prec="1" />
+  <channel id="281" name="DeflectorP" log="true" damp="0" prec="2" />
+  <channel id="282" name="RudderP" log="true" damp="0" prec="1" />
+  <channel id="283" name="RudderS" log="true" damp="0" prec="1" />
+  <channel id="284" name="RudderToe" log="true" damp="0" prec="1" />
+  <channel id="285" name="BspTr" log="false" damp="0" prec="2" />
+  <channel id="286" name="FStayInner" log="true" damp="0" prec="2" />
+  <channel id="287" name="GateTime" log="false" />
+  <channel id="288" name="Ahead" log="false" prec="2" />
+  <channel id="289" name="Brg" log="false" prec="0" />
+  <channel id="290" name="Rng" log="false" prec="3" />
+  <channel id="291" name="DeflectorS" log="true" damp="0" prec="2" />
+  <channel id="292" name="Bobstay" log="true" damp="0" prec="2" />
+  <channel id="293" name="Outhaul" log="true" damp="0" prec="2" />
+  <channel id="294" name="D0 P" log="false" damp="0" prec="2" />
+  <channel id="295" name="D0 S" log="false" damp="0" prec="2" />
+  <channel id="296" name="D1 P" log="false" damp="0" prec="2" />
+  <channel id="297" name="D1 S" log="false" damp="0" prec="2" />
+  <channel id="298" name="V0 P" log="true" damp="0" prec="2" />
+  <channel id="299" name="V0 S" log="true" damp="0" prec="2" />
+  <channel id="300" name="V1 P" log="true" damp="0" prec="2" />
+  <channel id="301" name="V1 S" log="true" damp="0" prec="2" />
+  <channel id="302" name="StTmPsimple" log="false" />
+  <channel id="303" name="StTmSsimple" log="false" />
+  <channel id="304" name="TargTWD" log="false" damp="0" prec="0" />
+  <channel id="305" name="TargTWDDelta" log="false" damp="0" prec="0" />
+  <channel id="306" name="PolTWS" log="false" damp="0" prec="1" />
+  <channel id="307" name="PolTWSDelta" log="false" damp="0" prec="1" />
+  <channel id="308" name="PolTWS%" log="false" damp="0" prec="1" />
+  <channel id="309" name="OppTrkCog" log="false" damp="0" prec="0" />
+  <channel id="310" name="StPinchP" log="false" />
+  <channel id="311" name="StPinchS" log="false" />
+  <channel id="312" name="PredTWD" log="false" prec="0" />
+  <channel id="313" name="PredTWS" log="false" prec="1" />
+  <channel id="314" name="PredMSLP" log="false" prec="2" />
+  <channel id="315" name="NxMk Lat" log="false" />
+  <channel id="316" name="NxMk Lon" log="false" />
+  <channel id="317" name="BoomAng" log="false" damp="0" prec="1" />
+  <channel id="318" name="Cunningham" log="true" damp="0" prec="2" />
+  <channel id="319" name="FStayInHal" log="true" damp="0" prec="2" />
+  <channel id="320" name="JibFurl" log="false" damp="0" prec="2" />
+  <channel id="321" name="JibH" log="false" damp="0" prec="2" />
+  <channel id="322" name="MastCant" log="true" damp="0" prec="1" />
+  <channel id="323" name="J1" log="true" damp="0" prec="2" />
+  <channel id="324" name="J2" log="true" damp="0" prec="2" />
+  <channel id="325" name="J3" log="true" damp="0" prec="2" />
+  <channel id="326" name="J4" log="true" damp="0" prec="2" />
+  <channel id="327" name="Foil P" log="false" damp="0" prec="2" />
+  <channel id="328" name="Foil S" log="false" damp="0" prec="2" />
+  <channel id="329" name="Reacher" log="true" damp="0" prec="2" />
+  <channel id="330" name="Blade" log="false" damp="0" prec="2" />
+  <channel id="331" name="Staysail" log="true" damp="0" prec="2" />
+  <channel id="332" name="Solent" log="true" damp="0" prec="2" />
+  <channel id="333" name="Tack" log="true" damp="0" prec="2" />
+  <channel id="334" name="TackP" log="true" damp="0" prec="2" />
+  <channel id="335" name="TackS" log="true" damp="0" prec="2" />
+  <channel id="336" name="DeflectU" log="true" damp="0" prec="2" />
+  <channel id="337" name="DeflectL" log="true" damp="0" prec="2" />
+  <channel id="338" name="WinchP" log="true" damp="0" prec="2" />
+  <channel id="339" name="WinchS" log="true" damp="0" prec="2" />
+  <channel id="340" name="SpinP" log="true" damp="0" prec="2" />
+  <channel id="341" name="SpinS" log="true" damp="0" prec="2" />
+  <channel id="342" name="MainH" log="true" damp="0" prec="2" />
+  <channel id="343" name="Mast2" log="true" damp="0" prec="2" />
+  <channel id="344" name="dPolHeel" log="false" damp="0" prec="1" />
+  <channel id="345" name="PrtBrgMean" log="false" prec="0" />
+  <channel id="346" name="StbBrgMean" log="false" prec="0" />
+  <channel id="347" name="PrtBrgSD" log="false" prec="1" />
+  <channel id="348" name="StbBrgSD" log="false" prec="1" />
+  <channel id="349" name="P burn" log="false" damp="0" />
+  <channel id="350" name="S burn" log="false" damp="0" />
+  <channel id="351" name="DepthAft" log="false" damp="0" prec="1" />
+  <channel id="352" name="Burn%" log="true" damp="0" prec="1" />
+  <channel id="353" name="PolBspS" log="false" damp="0" prec="2" />
+  <channel id="354" name="GunBspTarg%" log="true" damp="0" prec="2" />
+  <channel id="355" name="GunBspPol%" log="true" damp="0" prec="2" />
+  <channel id="356" name="LineTime" log="false" />
+  <channel id="357" name="dCrsCog" log="true" damp="0" prec="1" />
+  <channel id="358" name="LayTimeGPS" log="false" />
+  <channel id="359" name="EngTemp" log="false" damp="0" prec="1" />
+  <channel id="360" name="EngOilTemp" log="false" damp="0" prec="1" />
+  <channel id="361" name="TranOilTemp" log="true" damp="0" prec="1" />
+  <channel id="362" name="TranOilPres" log="true" damp="0" prec="2" />
+  <channel id="363" name="FuelLev" log="true" damp="0" prec="1" />
+  <channel id="364" name="Current" log="false" damp="0" prec="1" />
+  <channel id="365" name="Charge%" log="false" prec="1" />
+  <channel id="366" name="GtRng" log="false" prec="2" />
+  <channel id="367" name="GtBrg" log="false" prec="0" />
+  <channel id="368" name="TWG" log="true" damp="0" prec="1" />
+  <channel id="369" name="TWDG" log="true" damp="0" prec="0" />
+  <channel id="370" name="DewPt" log="false" damp="0" prec="1" />
+  <channel id="371" name="FStay+Tack" log="true" damp="0" prec="2" />
+  <channel id="372" name="Gradient" log="true" prec="1" />
+  <channel id="373" name="TWSGradient" log="true" damp="0" prec="1" />
+  <channel id="374" name="Rud Ptch P" log="true" damp="0" prec="2" />
+  <channel id="375" name="Rud Ptch S" log="true" damp="0" prec="2" />
+  <channel id="376" name="Test time" log="false" />
+  <channel id="377" name="GateSqWind" log="false" damp="0" prec="0" />
+  <channel id="378" name="GateBiasL" log="false" damp="0" prec="2" />
+  <channel id="379" name="WaterLev" log="true" damp="0" prec="1" />
+  <channel id="380" name="WaterLev2" log="true" damp="0" prec="1" />
+  <channel id="381" name="FuelLev2" log="true" damp="0" prec="1" />
+  <channel id="382" name="CANLoad%" log="false" damp="0" prec="0" />
+  <channel id="383" name="FastPkErr" log="true" prec="0" />
+  <channel id="384" name="PolBspS%" log="false" damp="0" prec="1" />
+  <channel id="385" name="TargBspS%" log="false" damp="0" prec="1" />
+  <channel id="386" name="OppTrkMk" log="false" damp="0" prec="0" />
+  <channel id="387" name="AirDen" log="false" damp="0" prec="2" />
+  <channel id="388" name="AirDenPred" log="false" damp="0" prec="2" />
+  <channel id="389" name="Volt 1" log="false" damp="0" prec="1" />
+  <channel id="390" name="Volt 2" log="false" damp="0" prec="1" />
+  <channel id="391" name="Volt 3" log="false" damp="0" prec="1" />
+  <channel id="392" name="Volt 4" log="false" damp="0" prec="1" />
+  <channel id="393" name="Current1" log="false" damp="0" prec="1" />
+  <channel id="394" name="Current2" log="false" damp="0" prec="1" />
+  <channel id="395" name="Current3" log="false" damp="0" prec="1" />
+  <channel id="396" name="Current4" log="false" damp="0" prec="1" />
+  <channel id="397" name="Charge1%" log="false" prec="1" />
+  <channel id="398" name="Charge2%" log="false" prec="1" />
+  <channel id="399" name="Charge3%" log="false" prec="1" />
+  <channel id="400" name="Charge4%" log="false" prec="1" />
+  <channel id="401" name="CalROT" log="true" damp="0" prec="1" />
+  <channel id="402" name="CalBrake" log="true" damp="0" prec="1" />
+  <channel id="403" name="CalAccel" log="true" damp="0" prec="2" />
+  <channel id="404" name="SailEvt" log="false" />
+  <channel id="405" name="MouseTm" log="false" />
+  <channel id="406" name="MouseTmPol" log="false" />
+  <channel id="407" name="PortFwd%" log="false" damp="0" prec="1" />
+  <channel id="408" name="PortAft%" log="false" damp="0" prec="1" />
+  <channel id="409" name="StbdFwd%" log="false" damp="0" prec="1" />
+  <channel id="410" name="StbdAft%" log="false" damp="0" prec="1" />
+  <channel id="411" name="TWDmin" log="true" prec="0" />
+  <channel id="412" name="TWDmax" log="true" prec="0" />
+  <channel id="413" name="PredSeaTemp" log="true" damp="0" prec="1" />
+</channels>

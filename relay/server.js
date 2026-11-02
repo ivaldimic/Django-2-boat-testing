@@ -52,9 +52,9 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// rooms: id -> { pubs: Map(boat -> Set(ws)), subs: Set(ws), last: Map(boat -> string) }
+// rooms: id -> { pubs: Map(boat -> Set(ws)), subs: Set(ws), last: Map(boat -> string), chans: Map(boat -> string) }
 const rooms = new Map();
-function getRoom(id) { let r = rooms.get(id); if (!r) { r = { pubs: new Map(), subs: new Set(), last: new Map() }; rooms.set(id, r); } return r; }
+function getRoom(id) { let r = rooms.get(id); if (!r) { r = { pubs: new Map(), subs: new Set(), last: new Map(), chans: new Map() }; rooms.set(id, r); } return r; }
 
 wss.on('connection', (ws, req) => {
   const q = url.parse(req.url, true).query;
@@ -75,6 +75,7 @@ wss.on('connection', (ws, req) => {
     console.log(`pub connected room=${roomId} boat=${boat}`);
   } else {
     r.subs.add(ws);
+    if (boat && r.chans.has(boat)) { try { ws.send(r.chans.get(boat)); } catch (_) {} }  // channel names first
     if (boat && r.last.has(boat)) { try { ws.send(r.last.get(boat)); } catch (_) {} }   // prime new viewer
     console.log(`sub connected room=${roomId} boat=${boat} (${r.subs.size} subs)`);
   }
@@ -82,8 +83,10 @@ wss.on('connection', (ws, req) => {
   ws.on('message', (data, isBinary) => {
     const s = data.toString();
     if (isPub) {
-      // boat NMEA -> cache + fan out to subscribers watching this boat
-      r.last.set(boat, s);
+      // boat data -> cache + fan out to subscribers watching this boat
+      // (the bridge's channel-name list is cached apart so late viewers get it)
+      if (s.startsWith('{') && s.includes('"kind":"channels"')) r.chans.set(boat, s);
+      else r.last.set(boat, s);
       for (const sub of r.subs) if (sub.readyState === 1 && sub._meta.boat === boat) sub.send(data, { binary: isBinary });
       return;
     }

@@ -104,7 +104,10 @@ function handleFrame(rt, data) {
   // Control channel (master → viewer sync) arrives as a single JSON message.
   const trimmed = data.trim();
   if (trimmed.startsWith('{')) {
-    try { const m = JSON.parse(trimmed); if (m && m.ctl) { handleControl(m); return; } } catch (_) {}
+    try {
+      const m = JSON.parse(trimmed);
+      if (m && m.ctl) { if (m.kind === 'channels') setExpChannels(m.channels); else handleControl(m); return; }
+    } catch (_) {}
   }
   const ts = Date.now();
   const lines = data.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -116,7 +119,7 @@ function onLine(rt, raw, ts) {
   rt.times.push(ts);
   const cut = ts - 5000;
   while (rt.times.length && rt.times[0] < cut) rt.times.shift();
-  parseNMEA(raw, rt.live);
+  if (raw[0] === '#') parseExpedition(raw, rt.live); else parseNMEA(raw, rt.live);
   rt.live.ts = ts;
 
   rt.recent.push({ ts, raw });
@@ -181,6 +184,42 @@ function coord(v, hemi, dd) {
   return d;
 }
 
+/* ---------- Expedition parse (into live state) ---------- */
+// "#<boat>,<ch>,<value>,<ch>,<value>,…*<checksum>". The bridge checks the
+// checksum and keeps only this connection's boat. Channels the app already
+// knows land on their usual keys (so tests work as with NMEA); every other
+// channel is kept as live.x<ch> and can be added to the dashboard.
+const EXP_CORE = { 1: 'bsp', 2: 'awa', 3: 'aws', 4: 'twa', 5: 'tws', 6: 'twd', 13: 'hdg', 18: 'heel', 19: 'pitch', 20: 'rudder', 48: 'lat', 49: 'lon', 50: 'cog', 51: 'sog' };
+const EXP_UNITS = { 9: '°', 10: '°', 11: '°', 12: 'kn', 17: 'm', 21: '°', 24: '°', 31: 'kn', 32: '°/s', 55: 'kn', 92: 'kn', 93: '°', 94: '°', 95: 'kn', 282: '°', 283: '°', 284: '°' };
+const EXP_ANGULAR = new Set([9, 11, 94, 102, 106, 109, 112, 272, 304, 312, 369, 411, 412]);
+function parseExpedition(raw, live) {
+  const star = raw.indexOf('*');
+  const f = (star >= 0 ? raw.slice(1, star) : raw.slice(1)).split(',');
+  for (let i = 1; i + 1 < f.length; i += 2) {
+    const id = parseInt(f[i], 10), v = parseFloat(f[i + 1]);
+    if (!Number.isFinite(id) || !Number.isFinite(v)) continue;
+    live[EXP_CORE[id] || `x${id}`] = EXP_CORE[id] === 'twa' || EXP_CORE[id] === 'awa' ? S.norm180(v) : v;
+  }
+}
+
+// Channel names come from the bridge (Expedition's channels.xml), kept on this
+// device so the dashboard keeps its labels before the bridge has sent them.
+const EXPCH_KEY = 'boat-receiver:expchannels:v1';
+const expDefs = new Map();   // ch number -> { name, prec }
+try { for (const c of JSON.parse(localStorage.getItem(EXPCH_KEY) || '[]')) expDefs.set(c.id, c); } catch (_) {}
+function setExpChannels(list) {
+  if (!Array.isArray(list) || !list.length) return;
+  let changed = false;
+  for (const c of list) {
+    if (!c || !Number.isFinite(c.id) || !c.name) continue;
+    const old = expDefs.get(c.id);
+    if (!old || old.name !== c.name || old.prec !== c.prec) { expDefs.set(c.id, { id: c.id, name: String(c.name), prec: c.prec }); changed = true; }
+  }
+  if (!changed) return;
+  try { localStorage.setItem(EXPCH_KEY, JSON.stringify([...expDefs.values()])); } catch (_) {}
+  if (state.strips.some((id) => id[0] === 'x')) buildStrips();   // pick up the new labels
+}
+
 /* ---------- status refresh ---------- */
 function boatStatus(rt, now) {
   if (!rt.def.url) return 'idle';
@@ -200,6 +239,7 @@ setInterval(() => {
     rt.pill.querySelector('.pill__rate').textContent = `${rate}/s`;
   }
   if (!$('drawer').hidden) renderStatusList(now);
+  if (!$('strip-modal').hidden) updatePickerVals();
   sampleHistory(now);
   renderDashboard(now);
 }, SAMPLE_MS);
@@ -219,7 +259,17 @@ const ALL_CHANNELS = [
   { key: 'rudder', id: 'rudder', label: 'RUDDER', unit: '°', angular: false, dp: 1 },
   { key: 'pitch', id: 'pitch', label: 'PITCH', unit: '°', angular: false, dp: 1 },
 ];
-const chById = (id) => ALL_CHANNELS.find((c) => c.id === id);
+// Built-in channel, or an Expedition channel by its "x<number>" id.
+function chById(id) {
+  const c = ALL_CHANNELS.find((x) => x.id === id);
+  if (c || !/^x\d+$/.test(id)) return c;
+  const n = +id.slice(1), d = expDefs.get(n);
+  return {
+    key: id, id, num: n, label: d ? d.name : `Ch ${n}`, unit: EXP_UNITS[n] || '',
+    angular: EXP_ANGULAR.has(n), dp: d && Number.isFinite(d.prec) ? d.prec : 2,
+  };
+}
+const escHTML = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const DEFAULT_STRIPS = ['bs', 'cog', 'twa', 'heel', 'rudder', 'twd', 'tws'];
 const STRIPS_KEY = 'boat-receiver:strips:v1';
 const TF_KEY = 'boat-receiver:stripwin:v1';
@@ -244,7 +294,7 @@ function buildStrips() {
     const fig = document.createElement('figure');
     fig.className = 'strip'; fig.dataset.id = id;
     fig.innerHTML =
-      `<figcaption><span class="strip__name">${ch.label}</span> <span class="strip__unit">${ch.unit}</span>` +
+      `<figcaption><span class="strip__name">${escHTML(ch.label)}</span> <span class="strip__unit">${escHTML(ch.unit)}</span>` +
       `<span class="strip__vals" id="val-${id}"></span>` +
       `<button class="strip__del" type="button" title="Remove" aria-label="Remove">&times;</button></figcaption>` +
       `<div class="strip__body"><canvas></canvas><div class="strip__avgbox" id="avg-${id}"></div></div>`;
@@ -269,6 +319,7 @@ function sampleHistory(now) {
     if (!l || !l.ts || (now - l.ts) >= LIVE_MS) continue;   // only sample fresh data
     const snap = { t: now, twa: twaVal(l) };
     for (const ch of ALL_CHANNELS) if (ch.key !== 'twa') snap[ch.key] = l[ch.key];
+    for (const k in l) if (k[0] === 'x') snap[k] = l[k];   // Expedition channels
     rt.hist.push(snap);
     const cut = now - HIST_MS;
     while (rt.hist.length && rt.hist[0].t < cut) rt.hist.shift();
@@ -276,10 +327,11 @@ function sampleHistory(now) {
     // running per-channel average since the test started
     if (state.test && state.test.running) {
       if (!rt.tavg) rt.tavg = {};
-      for (const ch of ALL_CHANNELS) {
-        const v = snap[ch.key];
+      for (const key in snap) {
+        if (key === 't') continue;
+        const v = snap[key];
         if (v == null || Number.isNaN(v)) continue;
-        const acc = rt.tavg[ch.key] || (rt.tavg[ch.key] = { sum: 0, sin: 0, cos: 0, n: 0 });
+        const acc = rt.tavg[key] || (rt.tavg[key] = { sum: 0, sin: 0, cos: 0, n: 0 });
         acc.n++; acc.sum += v; const r = v * Math.PI / 180; acc.sin += Math.sin(r); acc.cos += Math.cos(r);
       }
     }
@@ -366,18 +418,67 @@ function refreshTF() {
 for (const btn of $('tf').querySelectorAll('button')) {
   btn.addEventListener('click', () => { state.stripWindowMs = +btn.dataset.min * 60000; saveStripWin(); refreshTF(); });
 }
-function openStripPicker() {
-  const list = $('chan-list'); list.innerHTML = '';
-  const avail = ALL_CHANNELS.filter((c) => !state.strips.includes(c.id));
-  if (!avail.length) { list.innerHTML = '<p class="modal__hint">All variables are already shown.</p>'; }
-  for (const c of avail) {
-    const btn = document.createElement('button');
-    btn.type = 'button'; btn.className = 'chan-btn'; btn.textContent = `${c.label} (${c.unit})`;
-    btn.addEventListener('click', () => { state.strips.push(c.id); saveStrips(); buildStrips(); $('strip-modal').hidden = true; });
-    list.appendChild(btn);
-  }
-  $('strip-modal').hidden = false;
+// Every channel that can be charted: the built-in ones, plus each Expedition
+// channel some boat is sending (or that is already on the dashboard).
+function availableChannels() {
+  const nums = new Set();
+  for (const rt of state.rt.values()) for (const k in rt.live) if (k[0] === 'x') nums.add(+k.slice(1));
+  for (const id of state.strips) if (id[0] === 'x') nums.add(+id.slice(1));
+  const exp = [...nums].sort((a, b) => a - b).map((n) => chById(`x${n}`));
+  return { std: ALL_CHANNELS, exp };
 }
+function liveText(ch) {
+  return [...state.rt.values()].map((rt) => {
+    const v = ch.key === 'twa' ? twaVal(rt.live) : rt.live[ch.key];
+    const txt = (v == null || Number.isNaN(v)) ? '—' : (+v).toFixed(ch.dp);
+    return `<span style="color:${rt.color}">${txt}</span>`;
+  }).join(' ');
+}
+function renderStripPicker() {
+  const list = $('chan-list'); list.innerHTML = '';
+  const q = $('chan-search').value.trim().toLowerCase();
+  const match = (c) => !q || c.label.toLowerCase().includes(q) || c.id.toLowerCase().includes(q) || (c.num != null && String(c.num) === q);
+  const { std, exp } = availableChannels();
+  const group = (title, chans) => {
+    chans = chans.filter(match);
+    if (!chans.length) return;
+    const h = document.createElement('div'); h.className = 'chan-group'; h.textContent = title;
+    list.appendChild(h);
+    for (const c of chans) {
+      const on = state.strips.includes(c.id);
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'chan-btn'; btn.dataset.id = c.id;
+      btn.setAttribute('aria-pressed', String(on));
+      btn.innerHTML = `<span class="chan-btn__check" aria-hidden="true">${on ? '✓' : '+'}</span>` +
+        `<span class="chan-btn__name">${escHTML(c.label)}${c.unit ? ` <span class="chan-btn__unit">${escHTML(c.unit)}</span>` : ''}</span>` +
+        (c.num != null ? `<span class="chan-btn__num">#${c.num}</span>` : '') +
+        `<span class="chan-btn__vals">${liveText(c)}</span>`;
+      btn.addEventListener('click', () => {
+        state.strips = on ? state.strips.filter((x) => x !== c.id) : [...state.strips, c.id];
+        saveStrips(); buildStrips(); renderStripPicker();
+      });
+      list.appendChild(btn);
+    }
+  };
+  group('Standard', std);
+  group('Expedition channels', exp);
+  const note = q ? (list.children.length ? '' : 'No channel matches.')
+    : (exp.length ? '' : 'No Expedition channels received yet. They appear here once a boat sends Expedition-format data.');
+  if (note) list.insertAdjacentHTML('beforeend', `<p class="modal__hint">${note}</p>`);
+}
+function updatePickerVals() {
+  for (const btn of $('chan-list').querySelectorAll('.chan-btn')) {
+    const c = chById(btn.dataset.id), el = btn.querySelector('.chan-btn__vals');
+    if (c && el) el.innerHTML = liveText(c);
+  }
+}
+function openStripPicker() {
+  $('chan-search').value = '';
+  renderStripPicker();
+  $('strip-modal').hidden = false;
+  if (matchMedia('(pointer: fine)').matches) $('chan-search').focus();   // no pop-up keyboard on tablets
+}
+$('chan-search').addEventListener('input', renderStripPicker);
 $('add-strip').addEventListener('click', openStripPicker);
 $('strip-cancel').addEventListener('click', () => { $('strip-modal').hidden = true; });
 $('map-in').addEventListener('click', () => trackMap && trackMap.zoomAt(trackMap.W / 2, trackMap.H / 2, 1.3));

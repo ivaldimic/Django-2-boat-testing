@@ -1,5 +1,6 @@
 {
   "updateHz": 2,
+  "format": "expedition",
   "wind": {
     "tws": 12,
     "twd": 0

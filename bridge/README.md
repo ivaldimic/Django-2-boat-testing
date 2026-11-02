@@ -7,6 +7,7 @@ can open it with no extra hosting.
 
 ```
 Expedition ──UDP tx 5556──► bridge ──ws://this-pc:8080──► web app
+          (Expedition format)        (+ channel names from channels.xml)
 web app ──waypoint──► bridge ──UDP 5555──► Expedition
 ```
 
@@ -19,8 +20,8 @@ does exactly this: it receives on its network port and transmits on that port + 
 In Expedition → the UDP **Network** connection:
 - Connection **UDP**, Address **127.0.0.1**, Port **5555**
 - tick **"Tx on port + 1"**  → Expedition transmits on **5556**, receives on **5555**
-- (in **NMEA 0183 settings**, enable RMC/GLL, HDT, MWD, MWV, VHW so the app gets
-  position, heading, wind and boat speed)
+- Instruments: **Expedition** (Expedition's own data format), not NMEA 0183. See
+  [Expedition data format](#expedition-data-format) below.
 
 The bridge then listens on **5556** (Expedition's transmit) and sends the test
 waypoints back on **5555** (Expedition's receive) — matching `config.json`:
@@ -57,13 +58,14 @@ When it starts it prints the exact addresses to use, e.g.:
 In Expedition, open **Instruments** (Ctrl+I → *Serial and Network Ports*) and add
 an outgoing connection:
 
-- **Instruments:** NMEA 0183
+- **Instruments:** Expedition (the Expedition data format)
 - **Connection:** *UDP to IP address* → address `127.0.0.1`, port `5555`, with
   **"Tx on port + 1"** ticked, so Expedition transmits on `5556` (matches
   `udpPort` in `config.json`)
-- **NMEA 0183 settings:** tick the sentences to send (position, speed, wind,
-  heading — or tick everything; the app shows all of it)
 - **OK** and save the Expedition settings.
+
+NMEA 0183 output still works too (the bridge passes NMEA lines through
+unchanged), but it only carries position, speed, wind, heading, heel and rudder.
 
 Sending to `127.0.0.1` keeps the data on the local machine and straight into the
 bridge. Plain "UDP" broadcast also works if you prefer.
@@ -85,16 +87,48 @@ both at once, so it doesn't matter which boat's bridge served the page.
   "expedition": {       // where test waypoints are sent (Expedition's receive port)
     "host": "127.0.0.1",
     "port": 5555
-  }
+  },
+  "expeditionBoat": 0,  // which Expedition boat (#N) to forward; 0 = own boat
+  "channelsFile": "channels.xml"  // Expedition's channel definitions (names)
 }
 ```
+
+## Expedition data format
+
+Expedition sends plain-text lines like
+
+```
+#0,1,6.54,2,-25.20,3,14.21,4,-39.70,5,12.00*1C
+```
+
+`#<boat>` comes first (`0` = own boat, `1`… = other boats Expedition knows
+about). Then come `channel,value` pairs, and the line ends with a checksum: the
+XOR of every character from `#` up to `*`, in hex. The bridge:
+
+- drops lines with a bad checksum (it logs a count once a minute),
+- forwards only the lines for `expeditionBoat` to each client. A client can ask
+  for another boat by adding `?exp=N` to its address, e.g. `ws://192.168.1.101:8080/?exp=1`,
+  so one Expedition that tracks both boats can feed both of them in the app,
+- reads the channel names from `channelsFile` and sends them to each app when it
+  connects (and to the cloud relay). Point `channelsFile` at the `channels.xml`
+  of the Expedition install on this boat (absolute paths work) so user channels
+  show their configured names (e.g. `PLC_JibCunLoad` for *User 7*). A copy
+  of a sample `channels.xml` ships in this folder.
+
+In the app, the core channels (BSP, AWA, AWS, TWA, TWS, TWD, HDG, Heel, Trim,
+Rudder, Lat, Lon, COG, SOG) feed the tests as before. Every other channel
+received can be added to or removed from the dashboard with **Channels…** above
+the strip charts.
 
 ## Checks if no data shows up
 
 - Expedition's **Raw data** window shows sentences going out (data exists).
 - The bridge console prints `Receiving UDP from Expedition …` once the first
   packet arrives — if it never does, the Expedition UDP target/port is wrong.
-- The web app panel shows **Live** but no decoded chips: the feed isn't standard
-  NMEA 0183 — the raw stream still confirms data is flowing.
+- The web app panel shows **Live** but no values: check that Expedition sends the
+  Expedition format (lines start with `#`) or NMEA 0183. The raw stream panel
+  still confirms data is flowing.
+- Values are missing for this boat but `#1,…` lines show up in Expedition's raw
+  data: set `expeditionBoat` (or `?exp=N`) to the boat number you want.
 - Another device can't connect: Windows Firewall is blocking the port, or the
   address/port in the app is wrong.
