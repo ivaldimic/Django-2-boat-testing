@@ -2,7 +2,11 @@
 
 Stands in for the two on-boat bridges so you can build the app on this computer
 with no boats and no Expedition. It serves one WebSocket per boat and streams
-realistic NMEA for two boats close-hauled and slowly diverging.
+realistic data for two boats close-hauled and slowly diverging. By default it
+sends Expedition's own data format (`#0,channel,value,…`, including rig loads
+such as Forestay, Load S/P, BackStay and a user channel) plus the channel names
+from `../bridge/channels.xml`, exactly like the bridge. Set `"format": "nmea"` to
+send NMEA 0183 sentences instead.
 
 ## Run
 
@@ -27,6 +31,7 @@ open the app and both boats go **Live**.
 ```json
 {
   "updateHz": 2,
+  "format": "expedition",
   "wind": { "tws": 12.0, "twd": 0 },
   "boats": [
     { "port": 8090, "name": "Boat 1", "lat": 43.4325, "lon": 13.7542, "cog": 42, "hdg": 40, "sog": 6.6 },

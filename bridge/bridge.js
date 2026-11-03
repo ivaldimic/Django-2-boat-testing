@@ -4,8 +4,10 @@
  * Expedition UDP -> WebSocket bridge
  * ---------------------------------
  * Runs on the same PC as Expedition (one per boat). It:
- *   1. listens for the UDP data Expedition sends to this machine, and
- *   2. re-serves that data as a WebSocket the web app can connect to.
+ *   1. listens for the UDP data Expedition sends to this machine (Expedition's
+ *      own "#boat,channel,value,…" format, or NMEA 0183), and
+ *   2. re-serves that data as a WebSocket the web app can connect to, together
+ *      with the channel names from Expedition's channels.xml.
  *
  * It also serves the web app itself over http (from the repo root), so any
  * device on the network can just open http://<this-pc-ip>:<port> — and because
@@ -17,6 +19,7 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const url = require('url');
 const { WebSocketServer, WebSocket } = require('ws');
 
 // ---- Config ---------------------------------------------------------------
@@ -31,6 +34,64 @@ const { udpPort, port, serveWebApp } = config;
 // Where to send waypoints so Expedition receives them (Expedition must be set to
 // read incoming NMEA on this host:port). Configure `expedition` in config.json.
 const exp = Object.assign({ host: '127.0.0.1', port: 0 }, config.expedition || {});
+// Which Expedition boat to forward (#0 = own boat, #1.. = other boats Expedition
+// knows about). A client can pick another one with ?exp=N on its ws:// URL.
+const defaultExpBoat = config.expeditionBoat == null ? '0' : String(config.expeditionBoat);
+
+// ---- Expedition channel definitions (channels.xml) -------------------------
+// Expedition's own data format sends channels by number; the names come from
+// Expedition's channels.xml. Point `channelsFile` at the boat's copy so user
+// channels (User 0..31) get their configured names.
+const CHANNELS_PATH = path.resolve(__dirname, config.channelsFile || 'channels.xml');
+function loadChannels(file) {
+  let xml;
+  try { xml = fs.readFileSync(file, 'utf8'); }
+  catch (_) { console.warn(`No channel definitions at ${file} — the app will show channel numbers.`); return []; }
+  const out = [];
+  for (const m of xml.matchAll(/<channel\b([^>]*)\/?>/g)) {
+    const a = {};
+    for (const am of m[1].matchAll(/(\w+)="([^"]*)"/g)) a[am[1]] = am[2];
+    const id = parseInt(a.id, 10);
+    if (!Number.isFinite(id) || !a.name) continue;
+    const ch = { id, name: a.user || a.name };   // a user channel's own name beats "User 7"
+    if (a.prec != null && a.prec !== '') ch.prec = +a.prec;
+    out.push(ch);
+  }
+  console.log(`Loaded ${out.length} Expedition channel definitions from ${file}`);
+  return out;
+}
+const channelsMsg = JSON.stringify({ ctl: 1, kind: 'channels', channels: loadChannels(CHANNELS_PATH) });
+
+// ---- Expedition data lines --------------------------------------------------
+// "#<boat>,<ch>,<value>,<ch>,<value>,…*<checksum>". The checksum is the XOR of
+// every character from '#' up to '*'. Anything else (NMEA) is passed through as-is.
+function expChecksumOk(line) {
+  const star = line.lastIndexOf('*');
+  if (star < 0) return true;                                // checksum is optional
+  let c = 0; for (let i = 0; i < star; i++) c ^= line.charCodeAt(i);
+  return c === parseInt(line.slice(star + 1, star + 3), 16);
+}
+let badChecksums = 0;
+// Split a UDP datagram into { boat, line } items ('' boat = NMEA, goes to everyone).
+function decodeDatagram(text) {
+  const out = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line[0] === '#') {
+      if (!expChecksumOk(line)) { badChecksums++; continue; }
+      out.push({ boat: line.slice(1, line.indexOf(',')), line });
+    } else {
+      out.push({ boat: '', line });
+    }
+  }
+  return out;
+}
+// Join the lines of one datagram meant for a given Expedition boat.
+function linesFor(items, expBoat) {
+  const sel = items.filter((it) => it.boat === '' || it.boat === expBoat).map((it) => it.line);
+  return sel.length ? sel.join('\r\n') + '\r\n' : '';
+}
 
 // The web app lives in the repo root, one level up from this bridge folder.
 const WEB_ROOT = path.join(__dirname, '..');
@@ -69,7 +130,10 @@ const httpServer = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server: httpServer });
 
 wss.on('connection', (ws, req) => {
-  console.log(`Web app connected from ${req.socket.remoteAddress} (${wss.clients.size} connected)`);
+  const q = url.parse(req.url || '/', true).query;
+  ws.expBoat = q.exp != null && q.exp !== '' ? String(q.exp) : defaultExpBoat;
+  console.log(`Web app connected from ${req.socket.remoteAddress}, Expedition boat #${ws.expBoat} (${wss.clients.size} connected)`);
+  ws.send(channelsMsg);
   ws.on('message', (data, isBinary) => {
     const s = data.toString();
     if (s.startsWith('{')) {
@@ -108,9 +172,13 @@ function sendWaypointToExpedition(m) {
   });
 }
 
-function broadcast(text) {
+function broadcast(items) {
+  const cache = new Map();   // expBoat -> text, so each selection is built once
   for (const client of wss.clients) {
-    if (client.readyState === 1 /* OPEN */) client.send(text);
+    if (client.readyState !== 1 /* OPEN */) continue;
+    if (!cache.has(client.expBoat)) cache.set(client.expBoat, linesFor(items, client.expBoat));
+    const text = cache.get(client.expBoat);
+    if (text) client.send(text);
   }
 }
 
@@ -123,10 +191,15 @@ udp.on('message', (buf, rinfo) => {
     firstPacket = false;
     console.log(`Receiving UDP from Expedition (${rinfo.address}:${rinfo.port}) — forwarding to the web app.`);
   }
-  const text = buf.toString('utf8');
-  broadcast(text);           // LAN clients
-  uplinkSend(text);          // cloud relay (if configured)
+  const items = decodeDatagram(buf.toString('utf8'));
+  if (!items.length) return;
+  broadcast(items);                                    // LAN clients
+  const up = linesFor(items, uplinkExpBoat);
+  if (up) uplinkSend(up);                              // cloud relay (if configured)
 });
+setInterval(() => {
+  if (badChecksums) { console.warn(`Dropped ${badChecksums} Expedition line(s) with a bad checksum in the last minute.`); badChecksums = 0; }
+}, 60000);
 
 udp.on('error', (err) => console.error(`UDP error: ${err.message}`));
 udp.on('listening', () => {
@@ -137,9 +210,11 @@ udp.bind(udpPort);
 // ---- Optional cloud uplink (for boats on separate Starlink/5G networks) ----
 // Configure `relay` in config.json: { "url":"wss://host", "room":"team",
 // "token":"<PUBLISH_TOKEN>", "boat":"1" }. The bridge connects OUTBOUND to the
-// relay, pushes this boat's NMEA up, and forwards any waypoint it receives to
-// Expedition — no inbound ports or port-forwarding needed.
+// relay, pushes this boat's data up, and forwards any waypoint it receives to
+// Expedition — no inbound ports or port-forwarding needed. Optional
+// "expeditionBoat" picks which Expedition boat (#N) goes up (default as above).
 let uplink = null;
+const uplinkExpBoat = config.relay && config.relay.expeditionBoat != null ? String(config.relay.expeditionBoat) : defaultExpBoat;
 function uplinkSend(text) { if (uplink && uplink.readyState === 1) { try { uplink.send(text); } catch (_) {} } }
 function startUplink() {
   const rc = config.relay;
@@ -149,7 +224,7 @@ function startUplink() {
   const connect = () => {
     console.log(`Uplink: connecting to relay as boat ${rc.boat || '1'} …`);
     uplink = new WebSocket(wsUrl);
-    uplink.on('open', () => console.log('Uplink: connected to cloud relay.'));
+    uplink.on('open', () => { console.log('Uplink: connected to cloud relay.'); uplinkSend(channelsMsg); });
     uplink.on('message', (data) => {
       const s = data.toString();
       if (s.startsWith('{')) {
@@ -180,7 +255,7 @@ httpServer.listen(port, () => {
   console.log('');
   console.log('  Expedition bridge is running on this PC.');
   console.log('');
-  console.log(`  1. In Expedition (UDP network on 127.0.0.1:5555), tick "Tx on port + 1" so it transmits on ${udpPort}.`);
+  console.log(`  1. In Expedition (UDP network on 127.0.0.1:5555, Expedition format), tick "Tx on port + 1" so it transmits on ${udpPort}.`);
   console.log(`     (Waypoints are sent back to Expedition on ${exp.port || '<set expedition.port>'}.)`);
   console.log(`  2. In the web app, set this boat's address to:`);
   for (const ip of ips) console.log(`         ws://${ip}:${port}`);

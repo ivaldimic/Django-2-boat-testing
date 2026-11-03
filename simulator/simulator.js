@@ -5,8 +5,10 @@
  * ------------------
  * Stands in for the two on-boat bridges while you develop the app on this
  * computer. It serves one WebSocket per boat (default ports 8090 and 8091) and
- * streams realistic NMEA for two boats close-hauled and slowly diverging, using
- * a configurable wind (TWS/TWD) and per-boat HDG/COG/speed.
+ * streams realistic data for two boats close-hauled and slowly diverging, using
+ * a configurable wind (TWS/TWD) and per-boat HDG/COG/speed. `format` in
+ * config.json picks Expedition's own "#0,ch,value,…" lines (default, with the
+ * channel names from ../bridge/channels.xml, like the bridge) or NMEA 0183.
  *
  * Point the web app's two boats at:  ws://localhost:8090  and  ws://localhost:8091
  */
@@ -32,6 +34,24 @@ try {
 }
 
 const dtSec = 1 / (config.updateHz || 2);
+const FORMAT = config.format === 'nmea' ? 'nmea' : 'expedition';
+
+// Channel names, sent to each app on connect exactly as the bridge does.
+function loadChannels(file) {
+  let xml; try { xml = fs.readFileSync(file, 'utf8'); } catch (_) { return []; }
+  const out = [];
+  for (const m of xml.matchAll(/<channel\b([^>]*)\/?>/g)) {
+    const a = {};
+    for (const am of m[1].matchAll(/(\w+)="([^"]*)"/g)) a[am[1]] = am[2];
+    const id = parseInt(a.id, 10);
+    if (!Number.isFinite(id) || !a.name) continue;
+    const ch = { id, name: a.user || a.name };
+    if (a.prec != null && a.prec !== '') ch.prec = +a.prec;
+    out.push(ch);
+  }
+  return out;
+}
+const channelsMsg = JSON.stringify({ ctl: 1, kind: 'channels', channels: loadChannels(path.join(__dirname, '..', 'bridge', 'channels.xml')) });
 
 // ---- Helpers --------------------------------------------------------------
 function checksum(body) {
@@ -65,6 +85,12 @@ function utcDate(d) {
   return `${p(d.getUTCDate())}${p(d.getUTCMonth() + 1)}${String(d.getUTCFullYear()).slice(2)}`;
 }
 function wrap360(x) { return ((x % 360) + 360) % 360; }
+function norm180(x) { const a = wrap360(x); return a > 180 ? a - 360 : a; }
+// One Expedition line: "#0,ch,value,ch,value,…*CS" (XOR of '#' … before '*').
+function expLine(pairs) {
+  const body = `#0,${pairs.map(([ch, v]) => `${ch},${v}`).join(',')}`;
+  return `${body}*${checksum(body)}`;
+}
 function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
 
 // ---- Boat state + servers -------------------------------------------------
@@ -87,6 +113,7 @@ let running = true;
 boats.forEach((b) => {
   b.wss.on('connection', (ws) => {
     console.log(`${b.name}: app connected (${b.wss.clients.size} on port ${b.port})`);
+    if (FORMAT === 'expedition') ws.send(channelsMsg);
     // Relay a client's message to the other clients on this boat (master → viewers sync).
     ws.on('message', (data, isBinary) => {
       const s = data.toString();
@@ -100,7 +127,7 @@ boats.forEach((b) => {
     });
     ws.on('close', () => console.log(`${b.name}: app disconnected (${b.wss.clients.size} on port ${b.port})`));
   });
-  b.wss.on('listening', () => console.log(`${b.name}: serving NMEA at ws://localhost:${b.port}`));
+  b.wss.on('listening', () => console.log(`${b.name}: serving ${FORMAT === 'nmea' ? 'NMEA' : 'Expedition data'} at ws://localhost:${b.port}`));
 });
 
 // ---- Simulation loop ------------------------------------------------------
@@ -149,8 +176,22 @@ function emit(b) {
   const aws = Math.hypot(relE, relN) / KN_MS;
   const awFrom = (Math.atan2(-relE, -relN) * 180 / Math.PI + 360) % 360;
   const awaAbs = (awFrom - b.hdg + 360) % 360;
-  const mwv = sentence(`WIMWV,${awaAbs.toFixed(1)},R,${aws.toFixed(1)},N,A`);
 
+  if (FORMAT === 'expedition') {
+    // Grouped into short lines like Expedition does; the rig loads follow heel.
+    const fstay = 2.6 + 0.08 * (b.heel - b.heelBase) + (Math.random() - 0.5) * 0.05;
+    const lines = [
+      expLine([[1, bs.toFixed(2)], [2, norm180(awaAbs).toFixed(1)], [3, aws.toFixed(2)], [4, norm180(twd - b.hdg).toFixed(1)], [5, tws.toFixed(2)]]),
+      expLine([[6, twd.toFixed(1)], [13, b.hdg.toFixed(1)], [17, '12.40'], [18, b.heel.toFixed(2)], [19, (-0.4 + (Math.random() - 0.5) * 0.3).toFixed(2)]]),
+      expLine([[20, b.rudder.toFixed(2)], [22, fstay.toFixed(3)], [27, (fstay * 1.3).toFixed(3)], [28, (0.4 + Math.random() * 0.05).toFixed(3)], [171, (fstay * 0.45).toFixed(3)]]),
+      expLine([[48, b.lat.toFixed(6)], [49, b.lon.toFixed(6)], [50, b.cog.toFixed(1)], [51, b.sog.toFixed(3)], [179, (1.1 + 0.05 * Math.sin(b.t * 0.3)).toFixed(3)]]),
+    ];
+    const text = lines.join('\r\n') + '\r\n';
+    for (const ws of b.wss.clients) if (ws.readyState === 1) ws.send(text);
+    return;
+  }
+
+  const mwv = sentence(`WIMWV,${awaAbs.toFixed(1)},R,${aws.toFixed(1)},N,A`);
   const payload = `${rmc}\r\n${hdt}\r\n${mwd}\r\n${vhw}\r\n${xdr}\r\n${rsa}\r\n${mwv}\r\n`;
   for (const ws of b.wss.clients) if (ws.readyState === 1) ws.send(payload);
 }

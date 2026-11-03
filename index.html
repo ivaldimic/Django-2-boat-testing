@@ -101,7 +101,7 @@
             <button type="button" data-min="10">10m</button>
             <button type="button" data-min="20">20m</button>
           </div>
-          <button class="ghost-btn" id="add-strip" type="button">+ Add</button>
+          <button class="ghost-btn" id="add-strip" type="button">Channels…</button>
         </div>
         <section class="strips" id="strips"></section>
       </section>
@@ -169,12 +169,13 @@
 
   <!-- Add-strip picker -->
   <div class="modal" id="strip-modal" hidden>
-    <div class="modal__box">
-      <h2>Add strip chart</h2>
-      <p class="modal__hint">Pick a variable from the boat data stream.</p>
+    <div class="modal__box modal__box--wide">
+      <h2>Strip charts</h2>
+      <p class="modal__hint">Tap a channel to add it to the dashboard, tap again to remove it.</p>
+      <input class="chan-search" id="chan-search" type="search" placeholder="Search channels (name or number)" autocapitalize="off" autocorrect="off" spellcheck="false" />
       <div class="chan-list" id="chan-list"></div>
       <div class="modal__actions">
-        <button class="ghost-btn" id="strip-cancel" type="button">Cancel</button>
+        <button class="primary-btn" id="strip-cancel" type="button">Done</button>
       </div>
     </div>
   </div>
