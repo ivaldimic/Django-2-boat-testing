@@ -84,10 +84,10 @@ function connect(rt) {
   try { ws = new WebSocket(rt.def.url); }
   catch (_) { rt.conn = 'closed'; return scheduleReconnect(rt); }
   rt.ws = ws;
-  ws.onopen = () => { rt.retry = 0; rt.conn = 'open'; };
+  ws.onopen = () => { rt.retry = 0; rt.conn = 'open'; rt.badToken = false; };
   ws.onmessage = (ev) => handleFrame(rt, ev.data);
   ws.onerror = () => { try { ws.close(); } catch (_) {} };
-  ws.onclose = () => { rt.ws = null; rt.conn = 'closed'; scheduleReconnect(rt); };
+  ws.onclose = (ev) => { rt.ws = null; rt.conn = 'closed'; rt.badToken = ev.code === 4001; scheduleReconnect(rt); };   // 4001: relay rejected the token
 }
 function scheduleReconnect(rt) {
   if (rt.closing) return;
@@ -223,6 +223,7 @@ function setExpChannels(list) {
 /* ---------- status refresh ---------- */
 function boatStatus(rt, now) {
   if (!rt.def.url) return 'idle';
+  if (rt.badToken) return 'badtoken';
   if (rt.conn === 'connecting') return 'idle';
   if (rt.conn !== 'open') return 'down';
   if (!rt.lastTs || now - rt.lastTs > LIVE_MS) return 'stale';
@@ -235,7 +236,7 @@ setInterval(() => {
     const rate = rt.times.filter((t) => t >= now - 1000).length;
     rt.pill.dataset.state = st;
     rt.pill.querySelector('.pill__state').textContent =
-      st === 'live' ? 'Live' : st === 'stale' ? 'No data' : st === 'down' ? 'Offline' : 'Idle';
+      st === 'live' ? 'Live' : st === 'stale' ? 'No data' : st === 'badtoken' ? 'Bad token' : st === 'down' ? 'Offline' : 'Idle';
     rt.pill.querySelector('.pill__rate').textContent = `${rate}/s`;
   }
   if (!$('drawer').hidden) renderStatusList(now);
@@ -545,7 +546,7 @@ function renderStatusList(now) {
     const dot = document.createElement('span'); dot.className = 'pill__dot';
     const name = document.createElement('span'); name.className = 'sname'; name.textContent = rt.def.name;
     const info = document.createElement('span'); info.className = 'sinfo';
-    info.textContent = st === 'live' ? `${rate}/s` : st === 'stale' ? 'no data' : st === 'down' ? 'offline' : 'idle';
+    info.textContent = st === 'live' ? `${rate}/s` : st === 'stale' ? 'no data' : st === 'badtoken' ? 'bad token' : st === 'down' ? 'offline' : 'idle';
     row.append(dot, name, info);
     list.appendChild(row);
   }

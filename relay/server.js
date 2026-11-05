@@ -1,4 +1,4 @@
-'use strict';
+  'use strict';
 
 /*
  * Cloud relay + app host (deploy on Render as a Web Service).
@@ -18,7 +18,8 @@
  *
  * Security: TLS is provided by Render on *.onrender.com (so the app uses wss://).
  * Two shared secrets gate access — PUBLISH_TOKEN (boats) and VIEW_TOKEN (apps) —
- * set as environment variables in the Render dashboard.
+ * set as environment variables in the Render dashboard. PUBLISH_TOKEN is the
+ * stronger one, so an app may also connect with it (it still joins as a viewer).
  */
 
 const http = require('http');
@@ -63,7 +64,8 @@ wss.on('connection', (ws, req) => {
   const boat = String(q.boat || '').slice(0, 8);
   const token = String(q.token || '');
 
-  const okToken = isPub ? (PUBLISH_TOKEN && token === PUBLISH_TOKEN) : (VIEW_TOKEN && token === VIEW_TOKEN);
+  const okToken = isPub ? (PUBLISH_TOKEN && token === PUBLISH_TOKEN)
+    : ((VIEW_TOKEN && token === VIEW_TOKEN) || (PUBLISH_TOKEN && token === PUBLISH_TOKEN));
   if (!okToken) { try { ws.close(4001, 'bad token'); } catch (_) {} return; }
 
   const r = getRoom(roomId);

@@ -130,7 +130,8 @@ makes it feel like an app.
 - **TLS everywhere:** Render serves the app and the relay over HTTPS/WSS, so all
   traffic is encrypted.
 - **Two secrets:** boats authenticate with `PUBLISH_TOKEN` (publish rights);
-  apps use `VIEW_TOKEN` (read/mirror only). Only the boats can inject data.
+  apps use `VIEW_TOKEN` (read/mirror only). An app link may also carry the
+  `PUBLISH_TOKEN` (it still connects as a viewer). Only the boats can inject data.
 - The **view token lives in the viewer link** — treat the link as the password.
   To revoke, change `VIEW_TOKEN` in Render (redeploys in ~1 min); reshare the new
   link. Same for `PUBLISH_TOKEN` on the boats.
