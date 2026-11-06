@@ -97,7 +97,8 @@
       this.W = w; this.H = h;
     }
 
-    // data: { boats:[{name,color,lat,lon,hdg,cog,track}], range, bearing, marks:[{name,lat,lon,color}] }
+    // data: { boats:[{name,color,lat,lon,hdg,cog,track}], refIdx,
+    //         links:[{from,to,range,bearing}] (indices into boats), marks:[{name,lat,lon,color}] }
     setData(data) { this.data = data || { boats: [] }; this.draw(); }
 
     draw() {
@@ -105,7 +106,8 @@
       ctx.clearRect(0, 0, W, H);
       if (W <= 4 || H <= 4) return;
 
-      const boats = (this.data.boats || []).filter((b) => b.lat != null && b.lon != null);
+      const all = this.data.boats || [];
+      const boats = all.filter((b) => b.lat != null && b.lon != null);
       if (!boats.length) {
         ctx.fillStyle = CSS.faint; ctx.font = '13px system-ui, sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -171,15 +173,17 @@
         if (m.name) { ctx.fillStyle = m.color || CSS.mark; ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(m.name, p.x + s + 3, p.y); }
       }
 
-      // Range line between the first two boats
-      if (boats.length >= 2) {
-        const a = toPx(proj(boats[0].lat, boats[0].lon));
-        const c = toPx(proj(boats[1].lat, boats[1].lon));
+      // Range lines from the reference boat to each other boat
+      for (const ln of (this.data.links || [])) {
+        const A = all[ln.from], C = all[ln.to];
+        if (!A || !C || A.lat == null || C.lat == null) continue;
+        const a = toPx(proj(A.lat, A.lon));
+        const c = toPx(proj(C.lat, C.lon));
         ctx.strokeStyle = CSS.axis; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke(); ctx.setLineDash([]);
-        if (this.data.range != null) {
+        if (ln.range != null) {
           const mx = (a.x + c.x) / 2, my = (a.y + c.y) / 2;
-          const label = `${Math.round(this.data.range)} m` + (this.data.bearing != null ? `  ${String(Math.round(this.data.bearing)).padStart(3, '0')}°` : '');
+          const label = `${Math.round(ln.range)} m` + (ln.bearing != null ? `  ${String(Math.round(ln.bearing) % 360).padStart(3, '0')}°` : '');
           ctx.font = '11px ui-monospace, Menlo, monospace';
           const w = ctx.measureText(label).width;
           ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(mx - w / 2 - 5, my - 9, w + 10, 18);
@@ -196,6 +200,9 @@
           ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.sin(r) * 16, p.y - Math.cos(r) * 16); ctx.stroke();
         }
         ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
+        if (b === all[this.data.refIdx]) {   // ring marks the reference boat
+          ctx.strokeStyle = b.color; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, Math.PI * 2); ctx.stroke();
+        }
         ctx.fillStyle = '#1c2b38'; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
         ctx.fillText(b.name, p.x + 8, p.y - 6);
       }

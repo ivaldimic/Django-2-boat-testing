@@ -23,6 +23,7 @@ const state = {
   boats: [],              // [{id,name,url}]
   rt: new Map(),          // id -> runtime
   test: null,
+  refId: loadRef(),
 };
 
 /* ---------- persistence ---------- */
@@ -33,6 +34,11 @@ function loadBoats() {
 function saveBoats(list) { try { localStorage.setItem(BOATS_KEY, JSON.stringify(list)); } catch (_) {} }
 function loadRole() { try { return localStorage.getItem(ROLE_KEY); } catch (_) { return null; } }
 function saveRole(r) { try { localStorage.setItem(ROLE_KEY, r); } catch (_) {} }
+// Reference boat: each user picks their own (not synced); range/bearing, map
+// range lines and test gains are all measured from it to the other boat(s).
+const REF_KEY = 'boat-receiver:ref:v1';
+function loadRef() { try { return localStorage.getItem(REF_KEY); } catch (_) { return null; } }
+function saveRef(id) { try { localStorage.setItem(REF_KEY, id); } catch (_) {} }
 
 /* ---------- connections ---------- */
 function applyBoats(list) {
@@ -58,6 +64,42 @@ function applyBoats(list) {
     state.rt.set(def.id, rt);
     connect(rt);
   });
+  buildDashRefSwitch();
+}
+
+/* ---------- reference boat ---------- */
+// The saved choice if that boat still exists, otherwise the first boat.
+function currentRefId() {
+  if (state.rt.has(state.refId)) return state.refId;
+  const first = state.rt.keys().next();
+  return first.done ? null : first.value;
+}
+// A test compares two boats; use the user's reference if it is one of them.
+function testRefId(boats) {
+  const id = currentRefId();
+  return boats.some((b) => b.id === id) ? id : boats[0].id;
+}
+function setRef(id) {
+  state.refId = id; saveRef(id);
+  for (const s of document.querySelectorAll('#rb-ref .seg')) s.setAttribute('aria-pressed', String(s.dataset.id === currentRefId()));
+  const t = state.test;
+  if (t) { t.refId = testRefId(t.boats); updateRefSwitchPressed(); renderTest(); }
+  renderDashboard(Date.now());
+}
+function buildDashRefSwitch() {
+  const wrap = $('rb-ref'); if (!wrap) return;
+  wrap.innerHTML = '';
+  const ref = currentRefId();
+  for (const rt of state.rt.values()) {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'seg';
+    btn.textContent = rt.def.name;
+    btn.style.borderColor = rt.color;
+    btn.dataset.id = rt.def.id;
+    btn.setAttribute('aria-pressed', String(rt.def.id === ref));
+    btn.addEventListener('click', () => setRef(rt.def.id));
+    wrap.appendChild(btn);
+  }
 }
 
 function makePill(def, color) {
@@ -357,25 +399,32 @@ function renderDashboard(now) {
     track: rt.track,
   }));
 
-  let range = null, bearing = null;
-  const a = boats[0], b = boats[1];
-  if (a && b && a.lat != null && a.lon != null && b.lat != null && b.lon != null) {
-    const rb = S.rangeBearing(a.lat, a.lon, b.lat, b.lon);
-    range = rb.rangeM; bearing = rb.bearingDeg;
-    $('rb-range').textContent = `${Math.round(range)} m`;
-    $('rb-bearing').textContent = `${String(Math.round(bearing)).padStart(3, '0')}°`;
-  } else {
-    $('rb-range').textContent = '—';
-    $('rb-bearing').textContent = '—';
-  }
-  if (a && b) $('rb-note').innerHTML = `${a.name} &rarr; ${b.name}`;
+  // Range & bearing from the reference boat to each other boat.
+  const refIdx = Math.max(0, rts.findIndex((rt) => rt.def.id === currentRefId()));
+  const ref = boats[refIdx];
+  const links = [];
+  const pairs = boats.map((b, i) => {
+    if (i === refIdx) return '';
+    let range = '—', bearing = '—';
+    if (ref.lat != null && ref.lon != null && b.lat != null && b.lon != null) {
+      const rb = S.rangeBearing(ref.lat, ref.lon, b.lat, b.lon);
+      range = `${Math.round(rb.rangeM)} m`;
+      bearing = `${String(Math.round(rb.bearingDeg) % 360).padStart(3, '0')}°`;
+      links.push({ from: refIdx, to: i, range: rb.rangeM, bearing: rb.bearingDeg });
+    }
+    return `<div class="rb__pair">` +
+      `<div class="rb__item"><span class="rb__label">Range</span><span class="rb__value">${range}</span></div>` +
+      `<div class="rb__item"><span class="rb__label">Bearing</span><span class="rb__value">${bearing}</span></div>` +
+      `<div class="rb__note"><span style="color:${ref.color}">${escHTML(ref.name)}</span> &rarr; <span style="color:${b.color}">${escHTML(b.name)}</span></div></div>`;
+  }).join('');
+  $('rb-pairs').innerHTML = pairs || '<div class="rb__note">Add a second boat in Settings.</div>';
 
   const marks = [];
   if (state.test && state.test.waypoints) {
     if (state.test.type === 'VMC') { const w = state.test.waypoints[0]; if (w) marks.push({ name: 'VMC WP', lat: w.lat, lon: w.lon }); }
     else state.test.boats.forEach((b, i) => { const w = state.test.waypoints[i]; if (w) marks.push({ name: b.name, lat: w.lat, lon: w.lon, color: b.color }); });
   }
-  trackMap.setData({ boats, range, bearing, marks });
+  trackMap.setData({ boats, links, refIdx, marks });
 
   const win = state.stripWindowMs;
   const t0 = now - win;
@@ -589,7 +638,7 @@ function startTest(type, durationSec, wpRngNm, wpBrg) {
 
   state.test = {
     type, durationSec, startTs: Date.now(), running: true,
-    boats, refId: boats[0].id, twdRef: null,
+    boats, refId: testRefId(boats), twdRef: null,
     samples: [], waypoint: null, trimSec: 0, result: null,
     wp: (type === 'VMG') ? null : { rngM: (wpRngNm || (type === 'VMC' ? 20 : 2)) * NM_TO_M, brg: wpBrg || 0 },
     series: { primary: [], up: [], fwd: [] },
@@ -638,7 +687,7 @@ function broadcastControl(obj) {
 function testSyncPayload() {
   const t = state.test; if (!t) return null;
   return {
-    type: t.type, startTs: t.startTs, durationSec: t.durationSec, refId: t.refId,
+    type: t.type, startTs: t.startTs, durationSec: t.durationSec,
     waypoints: t.waypoints || null, wp: t.wp || null,
     running: !!t.running, trimSec: t.trimSec || 0,
     status: $('test-status').textContent,
@@ -665,7 +714,7 @@ function startRemoteTest(rt) {
   for (const b of boats) b.rt.tavg = {};
   state.test = {
     type: rt.type, durationSec: rt.durationSec, startTs: rt.startTs, running: rt.running,
-    boats, refId: rt.refId, waypoints: rt.waypoints || null, wp: rt.wp || null,
+    boats, refId: testRefId(boats), waypoints: rt.waypoints || null, wp: rt.wp || null,
     samples: [], trimSec: rt.trimSec || 0, result: null, remote: true,
     series: { primary: [], up: [], fwd: [] }, timer: null, lastSync: Date.now(),
   };
@@ -686,14 +735,13 @@ function applyRemoteSync(rt) {
   if (!rt) { if (state.test && state.test.remote) closeTest(); return; }
   if (!state.test || !state.test.remote || state.test.startTs !== rt.startTs) startRemoteTest(rt);
   const t = state.test; if (!t || !t.remote) return;
-  t.refId = rt.refId; t.trimSec = rt.trimSec || 0; t.durationSec = rt.durationSec;
+  t.trimSec = rt.trimSec || 0; t.durationSec = rt.durationSec;
   if (rt.waypoints) t.waypoints = rt.waypoints;
   if (rt.wp) t.wp = rt.wp;
   t.running = rt.running;
   if (!rt.running && t.timer) { clearInterval(t.timer); t.timer = null; }
   t.lastSync = Date.now();
   $('test-status').textContent = rt.status || (rt.running ? 'Running' : 'Stopped');
-  updateRefSwitchPressed();
   renderTest();
 }
 
@@ -701,23 +749,14 @@ function buildRefSwitch(boats) {
   const wrap = $('ref-switch'); wrap.innerHTML = '';
   const lab = document.createElement('span'); lab.className = 'ref-switch__label'; lab.textContent = 'Reference';
   wrap.appendChild(lab);
-  const isMaster = state.role === 'master';
   for (const b of boats) {
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'seg';
     btn.textContent = b.name;
     btn.style.borderColor = b.color;
     btn.dataset.id = b.id;
-    btn.disabled = !isMaster;                 // viewers can't change the reference
     btn.setAttribute('aria-pressed', String(b.id === state.test.refId));
-    btn.addEventListener('click', () => {
-      const t = state.test; if (!t || state.role !== 'master') return;
-      if (t.refId === b.id) return;
-      t.refId = b.id;
-      for (const s of wrap.querySelectorAll('.seg')) s.setAttribute('aria-pressed', String(s === btn));
-      renderTest();
-      broadcastSync();
-    });
+    btn.addEventListener('click', () => setRef(b.id));   // same per-user setting as the dashboard
     wrap.appendChild(btn);
   }
 }
@@ -954,7 +993,7 @@ function renderTest() {
     t.result = {
       type: t.type, startTs: t.startTs,
       durationSec: Math.round((cur.t - effectiveSamples(t)[0].t) / 1000),
-      winner, primaryLabel,
+      winner, primaryLabel, ref: ref.name,
       rate: (cur.primary != null && mins > 0) ? cur.primary / mins : null,
       fwd: cur.fwd, up: cur.up,
     };
@@ -1117,6 +1156,7 @@ function renderHistory() {
     add(esc(r.type));
     add(esc(mmss(r.durationSec)));
     add(winnerColor ? `<b style="color:${winnerColor}">${esc(r.winner)}</b>` : esc(r.winner));
+    add(r.ref ? esc(r.ref) : '—');
     add(r.rate == null ? '—' : `${num(r.rate, 1)} m/min`);
     add(num(r.fwd, 0));
     add(num(r.up, 0));
@@ -1125,13 +1165,13 @@ function renderHistory() {
   }
 }
 function exportCSV() {
-  const head = ['Date', 'Type', 'Duration', 'Winner', 'Gain rate (m/min)', 'FWD/BACK (m)', 'UP/DOWN (m)'];
+  const head = ['Date', 'Type', 'Duration', 'Winner', 'Reference', 'Gain rate (m/min)', 'FWD/BACK (m)', 'UP/DOWN (m)'];
   for (const bi of [0, 1]) for (const ch of AVG_CH) head.push(`Boat${bi + 1} avg ${ch.label}`);
   head.push('Boat1 name', 'Boat2 name');
   const val = (x, dp) => (x == null || Number.isNaN(x)) ? '' : (+x).toFixed(dp);
   const rows = history.map((r) => {
     const row = [
-      fmtDateTime(r.startTs), r.type, mmss(r.durationSec), r.winner,
+      fmtDateTime(r.startTs), r.type, mmss(r.durationSec), r.winner, r.ref || '',
       r.rate == null ? '' : r.rate.toFixed(1),
       r.fwd == null ? '' : r.fwd.toFixed(0),
       r.up == null ? '' : r.up.toFixed(0),

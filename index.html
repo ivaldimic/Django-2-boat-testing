@@ -69,15 +69,11 @@
 
     <section class="dashboard" id="dashboard">
       <div class="rb" id="rb">
-        <div class="rb__item">
-          <span class="rb__label">Range</span>
-          <span class="rb__value" id="rb-range">—</span>
+        <div class="ref-switch">
+          <span class="ref-switch__label">Reference</span>
+          <div class="ref-switch__btns" id="rb-ref"></div>
         </div>
-        <div class="rb__item">
-          <span class="rb__label">Bearing</span>
-          <span class="rb__value" id="rb-bearing">—</span>
-        </div>
-        <div class="rb__note" id="rb-note">boat&nbsp;1 → boat&nbsp;2</div>
+        <div class="rb__pairs" id="rb-pairs"></div>
       </div>
 
       <figure class="map">
@@ -119,7 +115,7 @@
       <div class="history__scroll">
         <table class="history__table">
           <thead>
-            <tr><th>Date</th><th>Type</th><th>Duration</th><th>Winner</th><th>Gain rate</th><th>FWD/BACK</th><th>UP/DOWN</th><th>BS</th><th>TWS</th><th>TWD</th><th>HDG</th><th>COG</th><th>SOG</th><th>HEEL</th><th>RUD</th></tr>
+            <tr><th>Date</th><th>Type</th><th>Duration</th><th>Winner</th><th>Ref</th><th>Gain rate</th><th>FWD/BACK</th><th>UP/DOWN</th><th>BS</th><th>TWS</th><th>TWD</th><th>HDG</th><th>COG</th><th>SOG</th><th>HEEL</th><th>RUD</th></tr>
           </thead>
           <tbody id="history-body"></tbody>
         </table>

@@ -55,15 +55,21 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
 
 1. **Pick a role.** The first screen asks master or viewer. The **master** runs
    the tests; **viewers** watch and their screen **mirrors the master's running
-   test** — start, stop, duration, waypoint, reference boat and trim all follow
+   test** — start, stop, duration, waypoint and trim all follow
    the master live (see "Master → viewer sync" below). Change it later in Settings.
-2. **Check connections.** The bar under the title shows each boat Live / No data /
+2. **Pick your reference boat.** The **Reference** switch above the map sets
+   which boat everything relative is measured from: range & bearing (to each
+   other boat), the range lines on the map (the reference boat has a ring), and
+   all test gains. It's your own choice, saved on this device. Each viewer can
+   pick their own, and switching only flips the signs of the gains. The same
+   switch appears in the test view. Saved results record the reference used.
+3. **Check connections.** The bar under the title shows each boat Live / No data /
    Offline with its data rate. Settings has the same plus the raw stream.
-3. **Run a test.** Three buttons top-left:
+4. **Run a test.** Three buttons top-left:
    - **VMG test** — prompts for a duration (default 5 min), then monitors four
-     gains between the two boats, all measured from the **Start** button. Pick the
-     **reference** boat; every gain is that boat relative to the other, and
-     switching reference just flips the signs. Definitions (as supplied):
+     gains between the two boats, all measured from the **Start** button. Every
+     gain is your **reference** boat relative to the other, and switching
+     reference just flips the signs. Definitions (as supplied):
      - **TWD used** — the average of both boats' TWD from the start of the test to
        now (shown in the header).
      - **VMG advantage** = the distance between the two boats' positions projected
@@ -107,7 +113,7 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
      the history or **Discard** it.
    - The three test buttons are colour-outlined (VMG teal, VMC orange, TWA
      purple); in the viewer role they're visible but disabled.
-4. **Live dashboard** (always on the main page, for master and viewers alike):
+5. **Live dashboard** (always on the main page, for master and viewers alike):
    - **Range & bearing** between the two boats, in metres and degrees true
      (boat 1 → boat 2), updated continuously.
    - **Track plot** — a north-up, equal-scale local plot of both boats with their
@@ -121,7 +127,7 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
      variables in the feed (SOG, BS, COG, HDG, TWA, AWA, TWD, TWS, AWS, HEEL,
      RUDDER, PITCH). The **time window** (1 / 5 / 10 / 20 min) is selectable at the
      top. Your choice of strips and window is saved on the device.
-5. **Test history** — at the bottom of the page, one row per saved test: date &
+6. **Test history** — at the bottom of the page, one row per saved test: date &
    time, type (VMG/VMC/TWA), duration, winner, gain rate, FWD/BACK, UP/DOWN, and
    the whole-test averages of **BS, TWS, TWD, HDG, COG, SOG, HEEL, RUDDER**, each
    shown as the two boats by **colour** (a legend maps colour to boat name). **Export CSV** downloads everything (each average as a
@@ -146,15 +152,14 @@ bridge's address, e.g. `ws://192.168.1.101:8080` and `ws://192.168.1.102:8080`.
 ## Master → viewer sync
 
 Viewers mirror the master's test automatically. The master broadcasts the test
-state — type, start time, duration, reference boat, waypoint(s), running/stopped
-and trim — as small JSON control messages over the **same boat WebSockets**. The
+state — type, start time, duration, waypoint(s), running/stopped and trim — as small JSON control messages over the **same boat WebSockets**. The
 bridge (and the simulator) **relay** each client's message to the other connected
 clients, so viewers receive it. Each viewer then reconstructs the test in mirror
 from its **own** identical boat feed plus those parameters, so only the light
 parameters travel, not the full sample stream.
 
-A viewer's test view is read-only: the Stop/Trim/Save/Discard controls and the
-reference switch are hidden or disabled, and it follows the master's Stop, trim
+A viewer's test view is read-only: the Stop/Trim/Save/Discard controls are
+hidden (the reference switch stays, as each user picks their own reference), and it follows the master's Stop, trim
 and Close. The master re-sends the state every ~1.5 s as a heartbeat, so a viewer
 that joins after a test has started still catches up; if the master's sync goes
 silent for a few seconds the viewer drops the mirrored test. This needs every
