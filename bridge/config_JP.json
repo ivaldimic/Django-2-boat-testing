@@ -1,0 +1,17 @@
+{
+  "udpPort": 5554,
+  "port": 8080,
+  "serveWebApp": true,
+  "expedition": {
+    "host": "127.0.0.1",
+    "port": 5551
+  },
+  "expeditionBoat": 0,
+  "channelsFile": "channels.xml",
+  "relay": {
+    "url": "wss://boat-relay.onrender.com",
+    "room": "team",
+    "token": "Django_publish26",
+    "boat": "2"
+  }
+}
