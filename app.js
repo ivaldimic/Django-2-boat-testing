@@ -1094,6 +1094,7 @@ const AVG_CH = [
   { key: 'bsp', label: 'BS', angular: false, dp: 1 },
   { key: 'tws', label: 'TWS', angular: false, dp: 1 },
   { key: 'twd', label: 'TWD', angular: true, dp: 0 },
+  { key: 'twa', label: 'TWA', angular: false, dp: 0 },
   { key: 'hdg', label: 'HDG', angular: true, dp: 0 },
   { key: 'cog', label: 'COG', angular: true, dp: 0 },
   { key: 'sog', label: 'SOG', angular: false, dp: 1 },
@@ -1193,6 +1194,15 @@ function mmss(sec) {
   sec = Math.max(0, Math.round(sec));
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
+
+/* ---------- clock ---------- */
+function tickClock() {
+  const el = $('clock'); if (!el) return;
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  el.textContent = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+tickClock();
+setInterval(tickClock, 1000);
 
 /* ---------- wiring ---------- */
 $('role-master').addEventListener('click', () => { setRole('master'); $('role-modal').hidden = true; });
