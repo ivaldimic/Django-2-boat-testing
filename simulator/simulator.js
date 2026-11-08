@@ -11,11 +11,15 @@
  * channel names from ../bridge/channels.xml, like the bridge) or NMEA 0183.
  *
  * Point the web app's two boats at:  ws://localhost:8090  and  ws://localhost:8091
+ *
+ * Like the relay, it also runs the two-boat tests for the apps (../testengine.js),
+ * fed with exactly the lines it sends out.
  */
 
 const { WebSocketServer } = require('ws');
 const fs = require('fs');
 const path = require('path');
+const { TestHub, fanout } = require('../testengine');
 
 // ---- Config ---------------------------------------------------------------
 const CONFIG_PATH = path.join(__dirname, 'config.json');
@@ -110,20 +114,28 @@ const boats = config.boats.map((b, i) => ({
 
 let running = true;
 
-boats.forEach((b) => {
+// ---- Test engine (both boats live in this process) -------------------------
+const appClients = () => boats.flatMap((b) => [...b.wss.clients]);
+const hub = new TestHub({
+  broadcast: (obj) => fanout(appClients(), obj, (c) => c.boatIdx),
+  sendWaypoint: (i, wp) => console.log(`${boats[i].name}: waypoint for Expedition → ${wp.name} ${wp.lat.toFixed(5)}, ${wp.lon.toFixed(5)}`),
+  log: (msg) => console.log(`tests: ${msg}`),
+});
+
+boats.forEach((b, i) => {
   b.wss.on('connection', (ws) => {
+    ws.boatIdx = i;
     console.log(`${b.name}: app connected (${b.wss.clients.size} on port ${b.port})`);
     if (FORMAT === 'expedition') ws.send(channelsMsg);
-    // Relay a client's message to the other clients on this boat (master → viewers sync).
-    ws.on('message', (data, isBinary) => {
+    const reply = (obj) => fanout([ws], obj, () => i);
+    hub.welcome(reply);
+    ws.on('message', (data) => {
       const s = data.toString();
-      if (s.startsWith('{')) {
-        try {
-          const m = JSON.parse(s);
-          if (m && m.kind === 'waypoint') { console.log(`${b.name}: waypoint for Expedition → ${m.name} ${(+m.lat).toFixed(5)}, ${(+m.lon).toFixed(5)}`); return; }
-        } catch (_) {}
-      }
-      for (const c of b.wss.clients) if (c !== ws && c.readyState === 1) c.send(data, { binary: isBinary });
+      if (!s.startsWith('{')) return;
+      try {
+        const m = JSON.parse(s);
+        if (m && m.kind === 'testcmd') hub.command(m, i, reply);
+      } catch (_) {}
     });
     ws.on('close', () => console.log(`${b.name}: app disconnected (${b.wss.clients.size} on port ${b.port})`));
   });
@@ -154,8 +166,13 @@ function restartBoats() {
   }
 }
 
+// Send to this boat's apps, and feed the test engine the very same text.
+function send(b, text) {
+  hub.feed(boats.indexOf(b), text);
+  for (const ws of b.wss.clients) if (ws.readyState === 1) ws.send(text);
+}
+
 function emit(b) {
-  if (!b.wss.clients.size) return;
   const now = new Date();
   const tws = config.wind.tws, twd = config.wind.twd;
 
@@ -186,14 +203,12 @@ function emit(b) {
       expLine([[20, b.rudder.toFixed(2)], [22, fstay.toFixed(3)], [27, (fstay * 1.3).toFixed(3)], [28, (0.4 + Math.random() * 0.05).toFixed(3)], [171, (fstay * 0.45).toFixed(3)]]),
       expLine([[48, b.lat.toFixed(6)], [49, b.lon.toFixed(6)], [50, b.cog.toFixed(1)], [51, b.sog.toFixed(3)], [179, (1.1 + 0.05 * Math.sin(b.t * 0.3)).toFixed(3)]]),
     ];
-    const text = lines.join('\r\n') + '\r\n';
-    for (const ws of b.wss.clients) if (ws.readyState === 1) ws.send(text);
+    send(b, lines.join('\r\n') + '\r\n');
     return;
   }
 
   const mwv = sentence(`WIMWV,${awaAbs.toFixed(1)},R,${aws.toFixed(1)},N,A`);
-  const payload = `${rmc}\r\n${hdt}\r\n${mwd}\r\n${vhw}\r\n${xdr}\r\n${rsa}\r\n${mwv}\r\n`;
-  for (const ws of b.wss.clients) if (ws.readyState === 1) ws.send(payload);
+  send(b, `${rmc}\r\n${hdt}\r\n${mwd}\r\n${vhw}\r\n${xdr}\r\n${rsa}\r\n${mwv}\r\n`);
 }
 
 setInterval(() => {

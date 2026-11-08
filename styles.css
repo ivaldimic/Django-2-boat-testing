@@ -160,6 +160,7 @@ h1,h2,h3 { margin: 0; }
 
 /* review controls after a test */
 .review { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.review[hidden] { display: none; }
 .review__trim { font-size: 12px; color: var(--ink-dim); display: flex; align-items: center; gap: 6px; }
 .review__trim input { width: 56px; font: inherit; font-size: 13px; color: var(--ink); background: var(--bg-grid); border: 1px solid var(--panel-edge); border-radius: 7px; padding: 6px 8px; }
 

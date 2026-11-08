@@ -24,7 +24,9 @@ It prints the addresses to use:
 ```
 
 The app already defaults to these two, so with the simulator running you can just
-open the app and both boats go **Live**.
+open the app and both boats go **Live**. The simulator also runs the two-boat
+tests for the app (`../testengine.js`), using the same lines it sends out, just
+as the cloud relay does.
 
 ## Configure the scenario — `config.json`
 

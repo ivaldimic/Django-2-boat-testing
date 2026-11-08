@@ -8,7 +8,7 @@ can open it with no extra hosting.
 ```
 Expedition ──UDP tx 5556──► bridge ──ws://this-pc:8080──► web app
           (Expedition format)        (+ channel names from channels.xml)
-web app ──waypoint──► bridge ──UDP 5555──► Expedition
+test engine ──waypoint──► bridge ──UDP 5555──► Expedition
 ```
 
 ## Expedition network setup (important — avoids the UDP port clash)
@@ -77,6 +77,24 @@ On each device (laptop, iPad, iPhone), open `http://<boat-pc-ip>:8080`. In
 `ws://192.168.1.101:8080` and `ws://192.168.1.102:8080`. The web app connects to
 both at once, so it doesn't matter which boat's bridge served the page.
 
+## Tests on the LAN — `peer`
+
+The two-boat tests run on a server that sees **both** boats. With the cloud relay
+that's the relay. On a LAN without it, give one bridge (or both) the other
+boat's bridge as its `peer`:
+
+```json
+{ "udpPort": 5556, "port": 8080, "serveWebApp": true,
+  "expedition": { "host": "127.0.0.1", "port": 5555 },
+  "peer": "ws://192.168.1.102:8080" }
+```
+
+That bridge then reads the other boat's data as well, runs the tests for the apps
+connected to it, and sends each test waypoint to the right boat: to its own
+Expedition directly, and to the other boat through the peer bridge. It prints
+`Peer: reading the other boat from …` once connected. A bridge without a peer
+tells the apps it can't run tests, and they connect to one that can.
+
 ## config.json
 
 ```json
@@ -89,7 +107,8 @@ both at once, so it doesn't matter which boat's bridge served the page.
     "port": 5555
   },
   "expeditionBoat": 0,  // which Expedition boat (#N) to forward; 0 = own boat
-  "channelsFile": "channels.xml"  // Expedition's channel definitions (names)
+  "channelsFile": "channels.xml",  // Expedition's channel definitions (names)
+  "peer": "ws://192.168.1.102:8080"  // optional: the other boat's bridge, to run tests on the LAN
 }
 ```
 
