@@ -10,6 +10,8 @@ const BOATS_KEY = 'boat-receiver:boats:v1';
 const ROLE_KEY = 'boat-receiver:role:v1';
 const MAX_LINES = 120;
 const LIVE_MS = 3000;
+const DELAY_MS = 10000;          // 3–10 s since the last fix: delayed (yellow)
+const LONG_DELAY_MS = 30000;     // 10–30 s: long delay (orange); beyond that: no data (red)
 const RECONNECT_MAX_MS = 8000;
 const COLORS = ['#0d9488', '#ea580c', '#7c3aed', '#0369a1'];
 const STRIP_WINDOW_MS = 120000;   // default strip window (2 minutes)
@@ -109,8 +111,10 @@ function buildDashRefSwitch() {
 function makePill(def, color) {
   const node = $('pill-template').content.firstElementChild.cloneNode(true);
   node.dataset.boatId = def.id;
-  node.querySelector('.pill__dot').style.background = color;
-  node.querySelector('.pill__name').textContent = def.name;
+  // the dot shows the data status (see boatStatus); the boat's colour goes on its name
+  const nameEl = node.querySelector('.pill__name');
+  nameEl.textContent = def.name;
+  nameEl.style.color = color;
   $('connbar').appendChild(node);
   return node;
 }
@@ -215,8 +219,12 @@ function boatStatus(rt, now) {
   if (rt.badToken) return 'badtoken';
   if (rt.conn === 'connecting') return 'idle';
   if (rt.conn !== 'open') return 'down';
-  if (!rt.lastTs || now - rt.lastTs > LIVE_MS) return 'stale';
-  return 'live';
+  if (!rt.lastTs) return 'stale';
+  const age = now - rt.lastTs;
+  if (age <= LIVE_MS) return 'live';
+  if (age <= DELAY_MS) return 'delay';
+  if (age <= LONG_DELAY_MS) return 'longdelay';
+  return 'stale';   // no data
 }
 setInterval(() => {
   const now = Date.now();
@@ -225,19 +233,21 @@ setInterval(() => {
     const rate = rt.times.filter((t) => t >= now - 1000).length;
     rt.pill.dataset.state = st;
     rt.pill.querySelector('.pill__state').textContent =
-      st === 'live' ? 'Live' : st === 'stale' ? 'No data' : st === 'badtoken' ? 'Bad token' : st === 'down' ? 'Offline' : 'Idle';
+      st === 'live' ? 'Live' : st === 'delay' ? 'Delay' : st === 'longdelay' ? 'Long delay' : st === 'stale' ? 'No data' : st === 'badtoken' ? 'Bad token' : st === 'down' ? 'Offline' : 'Idle';
     rt.pill.querySelector('.pill__rate').textContent = `${rate}/s`;
   }
   if (!$('drawer').hidden) renderStatusList(now);
   if (!$('strip-modal').hidden) updatePickerVals();
   sampleHistory(now);
   renderDashboard(now);
+  // keep the live readings inside the test boxes fresh
+  if (state.test && state.test.map) { const tb = testBoats(); if (tb.length >= 2) renderTestAverages(tb); }
 }, SAMPLE_MS);
 
 /* ---------- live dashboard (map + strips + range/bearing) ---------- */
 const ALL_CHANNELS = [
-  { key: 'sog', id: 'sog', label: 'SOG', unit: 'kn', angular: false, dp: 1 },
-  { key: 'bsp', id: 'bs', label: 'BS', unit: 'kn', angular: false, dp: 1 },
+  { key: 'sog', id: 'sog', label: 'SOG', unit: 'kn', angular: false, dp: 2 },
+  { key: 'bsp', id: 'bs', label: 'BS', unit: 'kn', angular: false, dp: 2 },
   { key: 'cog', id: 'cog', label: 'COG', unit: '°', angular: true, dp: 0 },
   { key: 'hdg', id: 'hdg', label: 'HDG', unit: '°', angular: true, dp: 0 },
   { key: 'twa', id: 'twa', label: 'TWA', unit: '°', angular: false, dp: 0 },
@@ -373,7 +383,7 @@ function renderDashboard(now) {
         const step = Math.max(1, Math.ceil(pts.length / 600));   // decimate for long windows
         return { color: rt.color, points: pts.filter((_, i) => i % step === 0).map((h) => ({ t: h.t, y: h[ch.key] })) };
       });
-      strips[id].setSeries(series, { now, windowMs: win, angular: ch.angular });
+      strips[id].setSeries(series, { now, windowMs: win, angular: ch.angular, axisDp: (ch.key === 'bsp' || ch.key === 'sog') ? 2 : 0 });
     }
     const valEl = $(`val-${id}`);
     if (valEl) {
@@ -470,6 +480,7 @@ $('strip-cancel').addEventListener('click', () => { $('strip-modal').hidden = tr
 $('map-in').addEventListener('click', () => trackMap && trackMap.zoomAt(trackMap.W / 2, trackMap.H / 2, 1.3));
 $('map-out').addEventListener('click', () => trackMap && trackMap.zoomAt(trackMap.W / 2, trackMap.H / 2, 1 / 1.3));
 $('map-fit').addEventListener('click', () => trackMap && trackMap.fit());
+$('map-boats').addEventListener('click', () => trackMap && trackMap.focusBoats());
 refreshTF();
 
 /* ---------- roles ---------- */
@@ -536,7 +547,7 @@ function renderStatusList(now) {
     const dot = document.createElement('span'); dot.className = 'pill__dot';
     const name = document.createElement('span'); name.className = 'sname'; name.textContent = rt.def.name;
     const info = document.createElement('span'); info.className = 'sinfo';
-    info.textContent = st === 'live' ? `${rate}/s` : st === 'stale' ? 'no data' : st === 'badtoken' ? 'bad token' : st === 'down' ? 'offline' : 'idle';
+    info.textContent = st === 'live' ? `${rate}/s` : st === 'delay' ? 'delay' : st === 'longdelay' ? 'long delay' : st === 'stale' ? 'no data' : st === 'badtoken' ? 'bad token' : st === 'down' ? 'offline' : 'idle';
     row.append(dot, name, info);
     list.appendChild(row);
   }
@@ -805,7 +816,7 @@ function renderTest() {
   else {
     if (cur.primary != null) {
       setDelta('dvmg', sign('primary') * cur.primary, 'm', t.downwind ? `${primaryLabel} gain (downwind)` : `${primaryLabel} gain`);
-      setDelta('rate', cur.rate != null ? sign('primary') * cur.rate : 0, 'm/min', `${primaryLabel} gain ÷ min`, 1);
+      setDelta('rate', cur.rate != null ? sign('primary') * cur.rate : 0, 'm/min', `${primaryLabel} gain ÷ min`, 2);
     } else { blank('dvmg'); blank('rate'); }
     if (t.type === 'VMG') { if (cur.fwd != null) setDelta('dfwd', sign('fwd') * cur.fwd, 'm', 'along average path'); else blank('dfwd'); }
     if (cur.up != null) setDelta('dup', sign('up') * cur.up, 'm', t.type === 'VMG' ? 'perp of avg path' : 'perp of WP bearing'); else blank('dup');
@@ -824,16 +835,32 @@ function renderTest() {
 }
 
 // A row of boxes with each variable's average over the test (per boat).
+// Same boxes as AVG_CH, plus HDG-COG (heading minus course, ±180°) right after TWA.
+// (built on demand: AVG_CH is declared further down)
+const testBoxes = () => AVG_CH.flatMap((ch) => ch.key === 'twa' ? [ch, { key: 'hdgcog', label: 'HDG-COG', dp: 0, signed: true }] : [ch]);
+function hdgMinusCog(hdg, cog) { return (hdg == null || cog == null || Number.isNaN(hdg) || Number.isNaN(cog)) ? null : S.norm180(hdg - cog); }
+// Average over the test of `key` for our boat i (HDG-COG from the averaged HDG and COG).
+function boxAvg(i, key) { return key === 'hdgcog' ? hdgMinusCog(testAvg(i, 'hdg'), testAvg(i, 'cog')) : testAvg(i, key); }
+// Latest reading of `key` for a boat (null when it has gone quiet).
+function boxLive(rt, key, now) {
+  if (!rt || !rt.live || !rt.lastTs || now - rt.lastTs > LIVE_MS) return null;
+  if (key === 'hdgcog') return hdgMinusCog(rt.live.hdg, rt.live.cog);
+  const v = key === 'twa' ? twaVal(rt.live) : rt.live[key];
+  return (v == null || Number.isNaN(v)) ? null : v;
+}
+function fmtBox(v, ch) {
+  if (v == null) return '—';
+  return ch.signed ? num(v, ch.dp) : (+v).toFixed(ch.dp);
+}
 function renderTestAverages(boats) {
   const el = $('test-averages'); if (!el) return;
-  el.innerHTML = AVG_CH.map((ch) => {
-    const cells = boats.map((b, i) => {
-      const v = testAvg(i, ch.key);
-      const txt = v == null ? '—' : (+v).toFixed(ch.dp);
-      return `<span class="tavg__v" style="color:${b.color}">${txt}</span>`;
-    }).join('<span class="tavg__sep">/</span>');
-    return `<div class="tavg__box"><span class="tavg__label">${ch.label}</span><div class="tavg__vals">${cells}</div></div>`;
-  }).join('');
+  const now = Date.now();
+  const row = (get, ch) => boats.map((b, i) => `<span class="tavg__v" style="color:${b.color}">${fmtBox(get(b, i), ch)}</span>`).join('<span class="tavg__sep">/</span>');
+  el.innerHTML = testBoxes().map((ch) =>
+    `<div class="tavg__box"><span class="tavg__label">${ch.label}</span>` +
+    `<div class="tavg__vals" title="Average over the test"><span class="tavg__tag">A</span>${row((b, i) => boxAvg(i, ch.key), ch)}</div>` +
+    `<div class="tavg__live" title="Live reading"><span class="tavg__tag">L</span>${row((b) => boxLive(b.rt, ch.key, now), ch)}</div></div>`
+  ).join('');
 }
 
 function setDelta(key, value, unit, sub, dp, blank) {
@@ -845,7 +872,7 @@ function setDelta(key, value, unit, sub, dp, blank) {
     el.querySelector('.tile__sub').textContent = '';
     return;
   }
-  const num = value.toFixed(dp || 0);
+  const num = value.toFixed(dp == null ? 1 : dp);
   v.textContent = `${value >= 0 ? '+' : '−'}${Math.abs(+num)} ${unit}`;
   v.classList.toggle('pos', value > 0.5);
   v.classList.toggle('neg', value < -0.5);
@@ -860,13 +887,13 @@ setInterval(() => {
 
 // Columns of the test averages row and the history table (the server averages every channel).
 const AVG_CH = [
-  { key: 'bsp', label: 'BS', dp: 1 },
+  { key: 'bsp', label: 'BS', dp: 2 },
   { key: 'tws', label: 'TWS', dp: 1 },
   { key: 'twd', label: 'TWD', dp: 0 },
   { key: 'twa', label: 'TWA', dp: 0 },
   { key: 'hdg', label: 'HDG', dp: 0 },
   { key: 'cog', label: 'COG', dp: 0 },
-  { key: 'sog', label: 'SOG', dp: 1 },
+  { key: 'sog', label: 'SOG', dp: 2 },
   { key: 'heel', label: 'HEEL', dp: 1 },
   { key: 'rudder', label: 'RUD', dp: 1 },
 ];

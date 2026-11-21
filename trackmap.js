@@ -84,6 +84,25 @@
     }
     panBy(dx, dy) { this._lock(); this.userPan.x += dx; this.userPan.y += dy; this.draw(); }
     fit() { this.locked = false; this.userScale = 1; this.userPan = { x: 0, y: 0 }; this.draw(); }
+    // Re-centre the view on the boats' current positions and zoom to frame just
+    // them (ignoring their older tracks); stays locked so it doesn't jump back.
+    focusBoats() {
+      const boats = (this.data.boats || []).filter((b) => b.lat != null && b.lon != null);
+      if (!boats.length || this.W <= 4 || this.H <= 4) return;
+      const B = this.base;
+      const lonM = LAT_M * Math.cos(B.lat0 * Math.PI / 180);
+      const pts = boats.map((b) => ({ x: (b.lon - B.lon0) * lonM, y: (b.lat - B.lat0) * LAT_M }));
+      const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+      const spanX = Math.max(maxX - minX, 40), spanY = Math.max(maxY - minY, 40);
+      const pad = 60;
+      const want = Math.min((this.W - pad * 2) / spanX, (this.H - pad * 2) / spanY);
+      this.userScale = Math.max(0.2, Math.min(1000, want / B.scale));
+      const scale = B.scale * this.userScale;
+      this.userPan = { x: -((minX + maxX) / 2 - B.cx) * scale, y: ((minY + maxY) / 2 - B.cy) * scale };
+      this.locked = true;
+      this.draw();
+    }
     _lock() { if (!this.locked) { this.locked = true; } }
 
     _resize() {
