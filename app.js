@@ -902,6 +902,18 @@ function addResult(r) {
   saveHistory(); renderHistory();
 }
 function fmtDateTime(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function fmtDate(ts) {
+  const d = new Date(ts); const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(-2)} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+// Point of sail and tack from the reference boat's average TWA (positive TWA = wind from port).
+function modeTack(r) {
+  const i = r.boats ? Math.max(0, r.boats.indexOf(r.ref)) : 0;
+  const twa = r.avg && r.avg[i] ? r.avg[i].twa : null;
+  if (twa == null || Number.isNaN(twa)) return { mode: '—', tack: '—' };
+  const a = Math.abs(twa);
+  return { mode: a <= 60 ? 'Upwind' : a <= 130 ? 'Reaching' : 'Downwind', tack: twa < 0 ? 'Stbd' : 'Port' };
+}
 function num(v, dp) { return (v == null || Number.isNaN(v)) ? '—' : (v >= 0 ? '+' : '−') + Math.abs(+v.toFixed(dp)); }
 function avgCellHTML(r, key, dp) {
   const c = r.colors || ['#8fb0c4', '#8fb0c4'];
@@ -928,9 +940,12 @@ function renderHistory() {
     const winnerColor = r.colors && r.boats ? (r.winner === r.boats[0] ? r.colors[0] : r.winner === r.boats[1] ? r.colors[1] : '') : '';
     const add = (html) => { const td = document.createElement('td'); td.innerHTML = html; tr.appendChild(td); };
     const esc = (s) => String(s).replace(/</g, '&lt;');
-    add(esc(fmtDateTime(r.startTs)));
-    add(esc(r.type));
+    const mt = modeTack(r);
+    add(esc(fmtDate(r.startTs)));
     add(esc(mmss(r.durationSec)));
+    add(esc(r.type));
+    add(mt.mode);
+    add(mt.tack);
     add(winnerColor ? `<b style="color:${winnerColor}">${esc(r.winner)}</b>` : esc(r.winner));
     add(r.ref ? esc(r.ref) : '—');
     add(r.rate == null ? '—' : `${num(r.rate, 1)} m/min`);
@@ -941,13 +956,14 @@ function renderHistory() {
   }
 }
 function exportCSV() {
-  const head = ['Date', 'Type', 'Duration', 'Winner', 'Reference', 'Gain rate (m/min)', 'FWD/BACK (m)', 'UP/DOWN (m)'];
+  const head = ['Date', 'Duration', 'Type', 'Mode', 'Tack', 'Winner', 'Reference', 'Gain rate (m/min)', 'FWD/BACK (m)', 'UP/DOWN (m)'];
   for (const bi of [0, 1]) for (const ch of AVG_CH) head.push(`Boat${bi + 1} avg ${ch.label}`);
   head.push('Boat1 name', 'Boat2 name');
   const val = (x, dp) => (x == null || Number.isNaN(x)) ? '' : (+x).toFixed(dp);
   const rows = history.map((r) => {
+    const mt = modeTack(r);
     const row = [
-      fmtDateTime(r.startTs), r.type, mmss(r.durationSec), r.winner, r.ref || '',
+      fmtDate(r.startTs), mmss(r.durationSec), r.type, mt.mode, mt.tack, r.winner, r.ref || '',
       r.rate == null ? '' : r.rate.toFixed(1),
       r.fwd == null ? '' : r.fwd.toFixed(0),
       r.up == null ? '' : r.up.toFixed(0),
