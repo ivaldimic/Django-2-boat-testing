@@ -12,6 +12,9 @@
  * It also serves the web app itself over http (from the repo root), so any
  * device on the network can just open http://<this-pc-ip>:<port> — and because
  * the page is served over http, it is allowed to open the ws:// connection.
+ *
+ * With `peer` set to the other boat's bridge, it also sees that boat's data and
+ * runs the two-boat tests for its LAN apps (../testengine.js).
  */
 
 const dgram = require('dgram');
@@ -21,6 +24,7 @@ const os = require('os');
 const path = require('path');
 const url = require('url');
 const { WebSocketServer, WebSocket } = require('ws');
+const { TestHub, fanout, noEngineHello } = require('../testengine');
 
 // ---- Config ---------------------------------------------------------------
 const CONFIG_PATH = path.join(__dirname, 'config.json');
@@ -129,25 +133,33 @@ const httpServer = http.createServer((req, res) => {
 // ---- WebSocket server (shares the http port) ------------------------------
 const wss = new WebSocketServer({ server: httpServer });
 
+// LAN app clients (not another bridge reading our feed as its peer).
+const appClients = () => [...wss.clients].filter((c) => !c.isPeer);
+
 wss.on('connection', (ws, req) => {
   const q = url.parse(req.url || '/', true).query;
   ws.expBoat = q.exp != null && q.exp !== '' ? String(q.exp) : defaultExpBoat;
-  console.log(`Web app connected from ${req.socket.remoteAddress}, Expedition boat #${ws.expBoat} (${wss.clients.size} connected)`);
+  ws.isPeer = q.peer === '1';
+  console.log(`${ws.isPeer ? 'Peer bridge' : 'Web app'} connected from ${req.socket.remoteAddress}, Expedition boat #${ws.expBoat} (${wss.clients.size} connected)`);
   ws.send(channelsMsg);
-  ws.on('message', (data, isBinary) => {
-    const s = data.toString();
-    if (s.startsWith('{')) {
+  if (ws.isPeer) {
+    // The other boat's bridge reads our data and may send waypoints for our Expedition.
+    ws.on('message', (data) => {
+      try { const m = JSON.parse(data.toString()); if (m && m.kind === 'waypoint' && Number.isFinite(m.lat) && Number.isFinite(m.lon)) sendWaypointToExpedition(m); } catch (_) {}
+    });
+  } else {
+    const reply = (obj) => fanout([ws], obj, () => 0);   // this bridge's own boat is test boat 0
+    if (hub) hub.welcome(reply); else reply(noEngineHello());
+    ws.on('message', (data) => {
+      const s = data.toString();
+      if (!s.startsWith('{')) return;
       try {
         const m = JSON.parse(s);
-        if (m && m.kind === 'waypoint' && Number.isFinite(m.lat) && Number.isFinite(m.lon)) {
-          sendWaypointToExpedition(m); return;      // don't relay waypoints to other clients
-        }
+        if (m && m.kind === 'testcmd' && hub) hub.command(m, 0, reply);
       } catch (_) {}
-    }
-    // Otherwise relay (master → viewer sync/result) to the OTHER clients.
-    for (const c of wss.clients) if (c !== ws && c.readyState === 1) c.send(data, { binary: isBinary });
-  });
-  ws.on('close', () => console.log(`Web app disconnected (${wss.clients.size} connected)`));
+    });
+  }
+  ws.on('close', () => console.log(`${ws.isPeer ? 'Peer bridge' : 'Web app'} disconnected (${wss.clients.size} connected)`));
 });
 
 // ---- Send a waypoint to Expedition as a WPL sentence over UDP --------------
@@ -194,6 +206,7 @@ udp.on('message', (buf, rinfo) => {
   const items = decodeDatagram(buf.toString('utf8'));
   if (!items.length) return;
   broadcast(items);                                    // LAN clients
+  if (hub) { const own = linesFor(items, defaultExpBoat); if (own) hub.feed(0, own); }   // test engine
   const up = linesFor(items, uplinkExpBoat);
   if (up) uplinkSend(up);                              // cloud relay (if configured)
 });
@@ -237,6 +250,40 @@ function startUplink() {
   connect();
 }
 startUplink();
+
+// ---- Optional peer: the other boat's bridge (two-boat tests on the LAN) ----
+// Set `peer` in config.json to the other bridge's ws:// address, e.g.
+// "ws://192.168.1.102:8080". This bridge then reads that boat's data too and
+// runs the tests for its LAN apps: its own boat is test boat 0, the peer's is 1.
+// Waypoints for the peer's boat are sent through that bridge to its Expedition.
+let hub = null;
+let peerWs = null;
+function startPeer() {
+  if (!config.peer) return;
+  hub = new TestHub({
+    broadcast: (obj) => fanout(appClients(), obj, () => 0),
+    sendWaypoint: (i, wp) => {
+      if (i === 0) { sendWaypointToExpedition(wp); return; }
+      if (peerWs && peerWs.readyState === 1) peerWs.send(JSON.stringify({ ctl: 1, kind: 'waypoint', ...wp }));
+      else console.log(`waypoint ${wp.name} for the peer boat not sent — peer bridge not connected`);
+    },
+    log: (msg) => console.log(`Tests: ${msg}`),
+  });
+  const peerUrl = String(config.peer).replace(/^http/, 'ws');
+  const wsUrl = peerUrl + (peerUrl.includes('?') ? '&' : '?') + 'peer=1';
+  const connect = () => {
+    peerWs = new WebSocket(wsUrl);
+    peerWs.on('open', () => console.log(`Peer: reading the other boat from ${peerUrl}`));
+    peerWs.on('message', (data) => {
+      const s = data.toString();
+      if (!s.startsWith('{')) hub.feed(1, s);          // data lines; ignore its control messages
+    });
+    peerWs.on('close', () => { peerWs = null; setTimeout(connect, 3000); });
+    peerWs.on('error', (e) => console.log(`Peer error: ${e.message}`));
+  };
+  connect();
+}
+startPeer();
 
 // ---- Start ----------------------------------------------------------------
 function lanIps() {

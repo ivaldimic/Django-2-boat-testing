@@ -14,7 +14,9 @@
  *   role=pub|view   room=<team>   boat=1|2   token=<secret>
  *   - publishers (boat bridges) push their boat's NMEA up and receive waypoint
  *     commands for their boat back down;
- *   - subscribers (apps) receive both boats' NMEA and exchange control (sync).
+ *   - subscribers (apps) receive both boats' NMEA, and send test commands.
+ * Each room runs the two-boat tests itself (../testengine.js), so every viewer
+ * gets the same gains, averages and results.
  *
  * Security: TLS is provided by Render on *.onrender.com (so the app uses wss://).
  * Two shared secrets gate access — PUBLISH_TOKEN (boats) and VIEW_TOKEN (apps) —
@@ -27,6 +29,7 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 const { WebSocketServer } = require('ws');
+const { TestHub, fanout } = require('../testengine');
 
 const PORT = process.env.PORT || 10000;
 const VIEW_TOKEN = process.env.VIEW_TOKEN || '';
@@ -53,9 +56,29 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// rooms: id -> { pubs: Map(boat -> Set(ws)), subs: Set(ws), last: Map(boat -> string), chans: Map(boat -> string) }
+// The test engine indexes the boats 0/1; rooms call them "1"/"2".
+const BOAT_KEYS = ['1', '2'];
+const boatIdx = (boat) => (boat === '2' ? 1 : 0);
+
+// rooms: id -> { pubs: Map(boat -> Set(ws)), subs: Set(ws), last: Map(boat -> string), chans: Map(boat -> string), hub: TestHub }
 const rooms = new Map();
-function getRoom(id) { let r = rooms.get(id); if (!r) { r = { pubs: new Map(), subs: new Set(), last: new Map(), chans: new Map() }; rooms.set(id, r); } return r; }
+function getRoom(id) {
+  let r = rooms.get(id);
+  if (!r) {
+    r = { pubs: new Map(), subs: new Set(), last: new Map(), chans: new Map() };
+    r.hub = new TestHub({
+      broadcast: (obj) => fanout(r.subs, obj, (c) => boatIdx(c._meta.boat)),
+      sendWaypoint: (i, wp) => {
+        const set = r.pubs.get(BOAT_KEYS[i]);
+        const msg = JSON.stringify({ ctl: 1, kind: 'waypoint', ...wp });
+        if (set) for (const p of set) if (p.readyState === 1) p.send(msg);
+      },
+      log: (msg) => console.log(`room=${id} ${msg}`),
+    });
+    rooms.set(id, r);
+  }
+  return r;
+}
 
 wss.on('connection', (ws, req) => {
   const q = url.parse(req.url, true).query;
@@ -79,6 +102,7 @@ wss.on('connection', (ws, req) => {
     r.subs.add(ws);
     if (boat && r.chans.has(boat)) { try { ws.send(r.chans.get(boat)); } catch (_) {} }  // channel names first
     if (boat && r.last.has(boat)) { try { ws.send(r.last.get(boat)); } catch (_) {} }   // prime new viewer
+    r.hub.welcome((obj) => fanout([ws], obj, () => boatIdx(boat)));                     // test state + results
     console.log(`sub connected room=${roomId} boat=${boat} (${r.subs.size} subs)`);
   }
 
@@ -88,28 +112,25 @@ wss.on('connection', (ws, req) => {
       // boat data -> cache + fan out to subscribers watching this boat
       // (the bridge's channel-name list is cached apart so late viewers get it)
       if (s.startsWith('{') && s.includes('"kind":"channels"')) r.chans.set(boat, s);
-      else r.last.set(boat, s);
+      else {
+        r.last.set(boat, s);
+        if (BOAT_KEYS.includes(boat)) r.hub.feed(boatIdx(boat), s);
+      }
       for (const sub of r.subs) if (sub.readyState === 1 && sub._meta.boat === boat) sub.send(data, { binary: isBinary });
       return;
     }
-    // subscriber -> waypoint (route down to this connection's boat) or control (fan to other subs)
-    if (s.startsWith('{')) {
-      try {
-        const m = JSON.parse(s);
-        if (m && m.kind === 'waypoint') {
-          const set = r.pubs.get(boat);
-          if (set) for (const p of set) if (p.readyState === 1) p.send(data, { binary: isBinary });
-          return;
-        }
-      } catch (_) {}
-    }
-    for (const sub of r.subs) if (sub !== ws && sub.readyState === 1) sub.send(data, { binary: isBinary });
+    // subscriber -> test command for this room's engine
+    if (!s.startsWith('{')) return;
+    try {
+      const m = JSON.parse(s);
+      if (m && m.kind === 'testcmd') r.hub.command(m, boatIdx(boat), (obj) => fanout([ws], obj, () => boatIdx(boat)));
+    } catch (_) {}
   });
 
   ws.on('close', () => {
     if (isPub) { const set = r.pubs.get(boat); if (set) { set.delete(ws); if (!set.size) r.pubs.delete(boat); } }
     else r.subs.delete(ws);
-    if (!r.subs.size && ![...r.pubs.values()].some((s) => s.size)) rooms.delete(roomId);
+    if (!r.subs.size && ![...r.pubs.values()].some((s) => s.size)) { r.hub.dispose(); rooms.delete(roomId); }
   });
   ws.on('error', () => {});
 });

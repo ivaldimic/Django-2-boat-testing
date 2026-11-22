@@ -1,13 +1,17 @@
 'use strict';
 
 /* Boat data receiver — app logic.
- * Connections (one WebSocket per boat), master/viewer roles, and the test
- * engine. VMG test is fully implemented; VMC/TWA are stubbed pending spec. */
+ * Connections (one WebSocket per boat), the live dashboard, master/viewer
+ * roles, and the test view. The tests themselves run on the server
+ * (testengine.js in the relay, bridge or simulator): the master sends it
+ * commands and every client shows the state it broadcasts. */
 
 const BOATS_KEY = 'boat-receiver:boats:v1';
 const ROLE_KEY = 'boat-receiver:role:v1';
 const MAX_LINES = 120;
 const LIVE_MS = 3000;
+const DELAY_MS = 10000;          // 3–10 s since the last fix: delayed (yellow)
+const LONG_DELAY_MS = 30000;     // 10–30 s: long delay (orange); beyond that: no data (red)
 const RECONNECT_MAX_MS = 8000;
 const COLORS = ['#0d9488', '#ea580c', '#7c3aed', '#0369a1'];
 const STRIP_WINDOW_MS = 120000;   // default strip window (2 minutes)
@@ -16,13 +20,16 @@ const TRACK_MS = 600000;          // keep up to 10 minutes of track
 const SAMPLE_MS = 500;            // history sample + dashboard redraw cadence
 
 const S = globalThis.SailMath;
+const FP = globalThis.FeedParse;
 const $ = (id) => document.getElementById(id);
 
 const state = {
   role: null,
   boats: [],              // [{id,name,url}]
   rt: new Map(),          // id -> runtime
-  test: null,
+  test: null,              // mirror of the server's test (see onTestState)
+  testSeq: -1, testBoot: null,
+  sep: null,               // last boat separation from the server
   refId: loadRef(),
 };
 
@@ -82,8 +89,7 @@ function testRefId(boats) {
 function setRef(id) {
   state.refId = id; saveRef(id);
   for (const s of document.querySelectorAll('#rb-ref .seg')) s.setAttribute('aria-pressed', String(s.dataset.id === currentRefId()));
-  const t = state.test;
-  if (t) { t.refId = testRefId(t.boats); updateRefSwitchPressed(); renderTest(); }
+  if (state.test) { updateRefSwitchPressed(); renderTest(); }
   renderDashboard(Date.now());
 }
 function buildDashRefSwitch() {
@@ -105,8 +111,10 @@ function buildDashRefSwitch() {
 function makePill(def, color) {
   const node = $('pill-template').content.firstElementChild.cloneNode(true);
   node.dataset.boatId = def.id;
-  node.querySelector('.pill__dot').style.background = color;
-  node.querySelector('.pill__name').textContent = def.name;
+  // the dot shows the data status (see boatStatus); the boat's colour goes on its name
+  const nameEl = node.querySelector('.pill__name');
+  nameEl.textContent = def.name;
+  nameEl.style.color = color;
   $('connbar').appendChild(node);
   return node;
 }
@@ -129,7 +137,11 @@ function connect(rt) {
   ws.onopen = () => { rt.retry = 0; rt.conn = 'open'; rt.badToken = false; };
   ws.onmessage = (ev) => handleFrame(rt, ev.data);
   ws.onerror = () => { try { ws.close(); } catch (_) {} };
-  ws.onclose = (ev) => { rt.ws = null; rt.conn = 'closed'; rt.badToken = ev.code === 4001; scheduleReconnect(rt); };   // 4001: relay rejected the token
+  ws.onclose = (ev) => {
+    rt.ws = null; rt.conn = 'closed'; rt.badToken = ev.code === 4001;   // 4001: relay rejected the token
+    rt.srv = null; gateControls();
+    scheduleReconnect(rt);
+  };
 }
 function scheduleReconnect(rt) {
   if (rt.closing) return;
@@ -143,17 +155,16 @@ function handleFrame(rt, data) {
     if (typeof Blob !== 'undefined' && data instanceof Blob) { data.text().then((t) => handleFrame(rt, t)).catch(() => {}); return; }
     try { data = new TextDecoder().decode(data); } catch (_) { return; }
   }
-  // Control channel (master → viewer sync) arrives as a single JSON message.
+  // Control messages (channel names, server test state) arrive as single JSON frames.
   const trimmed = data.trim();
   if (trimmed.startsWith('{')) {
     try {
       const m = JSON.parse(trimmed);
-      if (m && m.ctl) { if (m.kind === 'channels') setExpChannels(m.channels); else handleControl(m); return; }
+      if (m && m.ctl) { if (m.kind === 'channels') setExpChannels(m.channels); else handleControl(rt, m); return; }
     } catch (_) {}
   }
   const ts = Date.now();
-  const lines = data.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  for (const line of (lines.length ? lines : [data.trim()])) onLine(rt, line, ts);
+  for (const line of FP.splitLines(data)) onLine(rt, line, ts);
 }
 function onLine(rt, raw, ts) {
   rt.count += 1;
@@ -161,7 +172,7 @@ function onLine(rt, raw, ts) {
   rt.times.push(ts);
   const cut = ts - 5000;
   while (rt.times.length && rt.times[0] < cut) rt.times.shift();
-  if (raw[0] === '#') parseExpedition(raw, rt.live); else parseNMEA(raw, rt.live);
+  FP.parseLine(raw, rt.live);
   rt.live.ts = ts;
 
   rt.recent.push({ ts, raw });
@@ -180,69 +191,9 @@ function appendStreamLine(rt, raw, ts) {
   while (rt.sbox.list.children.length > MAX_LINES) rt.sbox.list.removeChild(rt.sbox.list.lastChild);
 }
 
-/* ---------- NMEA parse (into live state) ---------- */
-function parseNMEA(raw, live) {
-  if (!raw || (raw[0] !== '$' && raw[0] !== '!')) return;
-  const star = raw.indexOf('*');
-  const f = (star >= 0 ? raw.slice(1, star) : raw.slice(1)).split(',');
-  const type = (f[0] || '').slice(2);
-  switch (type) {
-    case 'RMC': setPos(live, f[3], f[4], f[5], f[6]); if (f[7]) live.sog = +f[7]; if (f[8]) live.cog = +f[8]; break;
-    case 'GGA': setPos(live, f[2], f[3], f[4], f[5]); break;
-    case 'GLL': setPos(live, f[1], f[2], f[3], f[4]); break;
-    case 'VTG': if (f[1]) live.cog = +f[1]; if (f[5]) live.sog = +f[5]; break;
-    case 'HDT': case 'HDG': if (f[1]) live.hdg = +f[1]; break;
-    case 'VHW': if (f[5]) live.bsp = +f[5]; break;
-    case 'MWV':
-      if (f[2] === 'T') { if (f[1]) live.twa = S.norm180(+f[1]); if (f[3]) live.tws = +f[3]; }
-      else if (f[2] === 'R') { if (f[1]) live.awa = S.norm180(+f[1]); if (f[3]) live.aws = +f[3]; }
-      break;
-    case 'MWD': if (f[1]) live.twd = +f[1]; if (f[5]) live.tws = +f[5]; break;
-    case 'RSA': if (f[1] !== '' && f[1] != null) live.rudder = +f[1]; break;
-    case 'XDR': parseXDR(f, live); break;
-  }
-}
-// XDR carries repeating groups of 4: type, value, unit, name.
-function parseXDR(f, live) {
-  for (let i = 1; i + 3 < f.length + 1; i += 4) {
-    const val = f[i + 1], name = (f[i + 3] || '').toUpperCase();
-    if (val === '' || val == null) continue;
-    if (name.includes('ROLL') || name.includes('HEEL')) live.heel = +val;
-    else if (name.includes('PITCH')) live.pitch = +val;
-    else if (name.includes('RUDDER')) live.rudder = +val;
-  }
-}
-function setPos(live, la, ns, lo, ew) {
-  const lat = coord(la, ns, 2), lon = coord(lo, ew, 3);
-  if (lat != null) live.lat = lat;
-  if (lon != null) live.lon = lon;
-}
-function coord(v, hemi, dd) {
-  if (!v) return null;
-  const deg = parseInt(v.slice(0, dd), 10), min = parseFloat(v.slice(dd));
-  if (Number.isNaN(deg) || Number.isNaN(min)) return null;
-  let d = deg + min / 60;
-  if (hemi === 'S' || hemi === 'W') d = -d;
-  return d;
-}
-
-/* ---------- Expedition parse (into live state) ---------- */
-// "#<boat>,<ch>,<value>,<ch>,<value>,…*<checksum>". The bridge checks the
-// checksum and keeps only this connection's boat. Channels the app already
-// knows land on their usual keys (so tests work as with NMEA); every other
-// channel is kept as live.x<ch> and can be added to the dashboard.
-const EXP_CORE = { 1: 'bsp', 2: 'awa', 3: 'aws', 4: 'twa', 5: 'tws', 6: 'twd', 13: 'hdg', 18: 'heel', 19: 'pitch', 20: 'rudder', 48: 'lat', 49: 'lon', 50: 'cog', 51: 'sog' };
+/* ---------- Expedition channels ---------- */
+// Parsing lives in feedparse.js (shared with the servers); these are display hints.
 const EXP_UNITS = { 9: '°', 10: '°', 11: '°', 12: 'kn', 17: 'm', 21: '°', 24: '°', 31: 'kn', 32: '°/s', 55: 'kn', 92: 'kn', 93: '°', 94: '°', 95: 'kn', 282: '°', 283: '°', 284: '°' };
-const EXP_ANGULAR = new Set([9, 11, 94, 102, 106, 109, 112, 272, 304, 312, 369, 411, 412]);
-function parseExpedition(raw, live) {
-  const star = raw.indexOf('*');
-  const f = (star >= 0 ? raw.slice(1, star) : raw.slice(1)).split(',');
-  for (let i = 1; i + 1 < f.length; i += 2) {
-    const id = parseInt(f[i], 10), v = parseFloat(f[i + 1]);
-    if (!Number.isFinite(id) || !Number.isFinite(v)) continue;
-    live[EXP_CORE[id] || `x${id}`] = EXP_CORE[id] === 'twa' || EXP_CORE[id] === 'awa' ? S.norm180(v) : v;
-  }
-}
 
 // Channel names come from the bridge (Expedition's channels.xml), kept on this
 // device so the dashboard keeps its labels before the bridge has sent them.
@@ -268,8 +219,12 @@ function boatStatus(rt, now) {
   if (rt.badToken) return 'badtoken';
   if (rt.conn === 'connecting') return 'idle';
   if (rt.conn !== 'open') return 'down';
-  if (!rt.lastTs || now - rt.lastTs > LIVE_MS) return 'stale';
-  return 'live';
+  if (!rt.lastTs) return 'stale';
+  const age = now - rt.lastTs;
+  if (age <= LIVE_MS) return 'live';
+  if (age <= DELAY_MS) return 'delay';
+  if (age <= LONG_DELAY_MS) return 'longdelay';
+  return 'stale';   // no data
 }
 setInterval(() => {
   const now = Date.now();
@@ -278,19 +233,21 @@ setInterval(() => {
     const rate = rt.times.filter((t) => t >= now - 1000).length;
     rt.pill.dataset.state = st;
     rt.pill.querySelector('.pill__state').textContent =
-      st === 'live' ? 'Live' : st === 'stale' ? 'No data' : st === 'badtoken' ? 'Bad token' : st === 'down' ? 'Offline' : 'Idle';
+      st === 'live' ? 'Live' : st === 'delay' ? 'Delay' : st === 'longdelay' ? 'Long delay' : st === 'stale' ? 'No data' : st === 'badtoken' ? 'Bad token' : st === 'down' ? 'Offline' : 'Idle';
     rt.pill.querySelector('.pill__rate').textContent = `${rate}/s`;
   }
   if (!$('drawer').hidden) renderStatusList(now);
   if (!$('strip-modal').hidden) updatePickerVals();
   sampleHistory(now);
   renderDashboard(now);
+  // keep the live readings inside the test boxes fresh
+  if (state.test && state.test.map) { const tb = testBoats(); if (tb.length >= 2) renderTestAverages(tb); }
 }, SAMPLE_MS);
 
 /* ---------- live dashboard (map + strips + range/bearing) ---------- */
 const ALL_CHANNELS = [
-  { key: 'sog', id: 'sog', label: 'SOG', unit: 'kn', angular: false, dp: 1 },
-  { key: 'bsp', id: 'bs', label: 'BS', unit: 'kn', angular: false, dp: 1 },
+  { key: 'sog', id: 'sog', label: 'SOG', unit: 'kn', angular: false, dp: 2 },
+  { key: 'bsp', id: 'bs', label: 'BS', unit: 'kn', angular: false, dp: 2 },
   { key: 'cog', id: 'cog', label: 'COG', unit: '°', angular: true, dp: 0 },
   { key: 'hdg', id: 'hdg', label: 'HDG', unit: '°', angular: true, dp: 0 },
   { key: 'twa', id: 'twa', label: 'TWA', unit: '°', angular: false, dp: 0 },
@@ -309,7 +266,7 @@ function chById(id) {
   const n = +id.slice(1), d = expDefs.get(n);
   return {
     key: id, id, num: n, label: d ? d.name : `Ch ${n}`, unit: EXP_UNITS[n] || '',
-    angular: EXP_ANGULAR.has(n), dp: d && Number.isFinite(d.prec) ? d.prec : 2,
+    angular: FP.isAngular(id), dp: d && Number.isFinite(d.prec) ? d.prec : 2,
   };
 }
 const escHTML = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -326,7 +283,7 @@ state.stripWindowMs = loadStripWin();
 
 let trackMap = null;
 const strips = {};   // id -> StripChart
-function twaVal(l) { return (l.cog != null && l.twd != null) ? S.twa(l.cog, l.twd) : l.twa; }
+const twaVal = FP.twaVal;
 
 function buildStrips() {
   const wrap = $('strips'); if (!wrap) return;
@@ -367,18 +324,6 @@ function sampleHistory(now) {
     const cut = now - HIST_MS;
     while (rt.hist.length && rt.hist[0].t < cut) rt.hist.shift();
 
-    // running per-channel average since the test started
-    if (state.test && state.test.running) {
-      if (!rt.tavg) rt.tavg = {};
-      for (const key in snap) {
-        if (key === 't') continue;
-        const v = snap[key];
-        if (v == null || Number.isNaN(v)) continue;
-        const acc = rt.tavg[key] || (rt.tavg[key] = { sum: 0, sin: 0, cos: 0, n: 0 });
-        acc.n++; acc.sum += v; const r = v * Math.PI / 180; acc.sin += Math.sin(r); acc.cos += Math.cos(r);
-      }
-    }
-
     if (l.lat != null && l.lon != null) {
       const last = rt.track[rt.track.length - 1];
       const moved = last ? S.rangeBearing(last.lat, last.lon, l.lat, l.lon).rangeM : Infinity;
@@ -399,15 +344,16 @@ function renderDashboard(now) {
     track: rt.track,
   }));
 
-  // Range & bearing from the reference boat to each other boat.
+  // Range & bearing from the reference boat to each other boat, as computed by
+  // the server (it only knows the two test boats).
   const refIdx = Math.max(0, rts.findIndex((rt) => rt.def.id === currentRefId()));
   const ref = boats[refIdx];
   const links = [];
   const pairs = boats.map((b, i) => {
     if (i === refIdx) return '';
     let range = '—', bearing = '—';
-    if (ref.lat != null && ref.lon != null && b.lat != null && b.lon != null) {
-      const rb = S.rangeBearing(ref.lat, ref.lon, b.lat, b.lon);
+    const rb = serverRangeBearing(refIdx, i, now);
+    if (rb) {
       range = `${Math.round(rb.rangeM)} m`;
       bearing = `${String(Math.round(rb.bearingDeg) % 360).padStart(3, '0')}°`;
       links.push({ from: refIdx, to: i, range: rb.rangeM, bearing: rb.bearingDeg });
@@ -420,9 +366,10 @@ function renderDashboard(now) {
   $('rb-pairs').innerHTML = pairs || '<div class="rb__note">Add a second boat in Settings.</div>';
 
   const marks = [];
-  if (state.test && state.test.waypoints) {
-    if (state.test.type === 'VMC') { const w = state.test.waypoints[0]; if (w) marks.push({ name: 'VMC WP', lat: w.lat, lon: w.lon }); }
-    else state.test.boats.forEach((b, i) => { const w = state.test.waypoints[i]; if (w) marks.push({ name: b.name, lat: w.lat, lon: w.lon, color: b.color }); });
+  const t = state.test;
+  if (t && t.waypoints) {
+    if (t.type === 'VMC') { const w = t.waypoints[0]; if (w) marks.push({ name: 'VMC WP', lat: w.lat, lon: w.lon }); }
+    else t.waypoints.forEach((w, k) => { const b = testBoatForSrv(k); if (w && b) marks.push({ name: b.name, lat: w.lat, lon: w.lon, color: b.color }); });
   }
   trackMap.setData({ boats, links, refIdx, marks });
 
@@ -436,7 +383,7 @@ function renderDashboard(now) {
         const step = Math.max(1, Math.ceil(pts.length / 600));   // decimate for long windows
         return { color: rt.color, points: pts.filter((_, i) => i % step === 0).map((h) => ({ t: h.t, y: h[ch.key] })) };
       });
-      strips[id].setSeries(series, { now, windowMs: win, angular: ch.angular });
+      strips[id].setSeries(series, { now, windowMs: win, angular: ch.angular, axisDp: (ch.key === 'bsp' || ch.key === 'sog') ? 2 : 0 });
     }
     const valEl = $(`val-${id}`);
     if (valEl) {
@@ -448,10 +395,9 @@ function renderDashboard(now) {
     }
     const avgEl = $(`avg-${id}`);
     if (avgEl) {
-      const rows = rts.map((rt) => {
-        const acc = state.test && rt.tavg && rt.tavg[ch.key];
-        const txt = (!acc || !acc.n) ? '—'
-          : (ch.angular ? (Math.atan2(acc.sin, acc.cos) * 180 / Math.PI + 360) % 360 : acc.sum / acc.n).toFixed(ch.dp);
+      const rows = rts.map((rt, i) => {
+        const v = testAvg(i, ch.key);
+        const txt = v == null ? '—' : (+v).toFixed(ch.dp);
         return `<span class="avgrow"><span class="avgdot" style="background:${rt.color}"></span><span class="avgval" style="color:${rt.color}">${txt}</span></span>`;
       }).join('');
       avgEl.innerHTML = `<span class="avglabel">avg${state.test ? '' : ' · run a test'}</span>${rows}`;
@@ -534,6 +480,7 @@ $('strip-cancel').addEventListener('click', () => { $('strip-modal').hidden = tr
 $('map-in').addEventListener('click', () => trackMap && trackMap.zoomAt(trackMap.W / 2, trackMap.H / 2, 1.3));
 $('map-out').addEventListener('click', () => trackMap && trackMap.zoomAt(trackMap.W / 2, trackMap.H / 2, 1 / 1.3));
 $('map-fit').addEventListener('click', () => trackMap && trackMap.fit());
+$('map-boats').addEventListener('click', () => trackMap && trackMap.focusBoats());
 refreshTF();
 
 /* ---------- roles ---------- */
@@ -551,7 +498,12 @@ function setRole(role) {
 }
 function gateControls() {
   const isMaster = state.role === 'master';
-  for (const b of $('tests').querySelectorAll('.test-btn')) b.disabled = !isMaster;
+  const engine = !!engineConn();   // a connected server that can run tests
+  for (const b of $('tests').querySelectorAll('.test-btn')) {
+    b.disabled = !isMaster || !engine;
+    b.title = isMaster && !engine ? 'Waiting for a server that sees both boats' : '';
+  }
+  if (state.test) renderTest();    // the master's Stop / review controls
 }
 
 /* ---------- settings drawer ---------- */
@@ -595,7 +547,7 @@ function renderStatusList(now) {
     const dot = document.createElement('span'); dot.className = 'pill__dot';
     const name = document.createElement('span'); name.className = 'sname'; name.textContent = rt.def.name;
     const info = document.createElement('span'); info.className = 'sinfo';
-    info.textContent = st === 'live' ? `${rate}/s` : st === 'stale' ? 'no data' : st === 'badtoken' ? 'bad token' : st === 'down' ? 'offline' : 'idle';
+    info.textContent = st === 'live' ? `${rate}/s` : st === 'delay' ? 'delay' : st === 'longdelay' ? 'long delay' : st === 'stale' ? 'no data' : st === 'badtoken' ? 'bad token' : st === 'down' ? 'offline' : 'idle';
     row.append(dot, name, info);
     list.appendChild(row);
   }
@@ -620,158 +572,181 @@ function openSetup(type) {
   $('duration-modal').hidden = false;
 }
 
-/* ---------- test engine (VMG) ---------- */
+/* ---------- tests (run on the server) ---------- */
+// The server that sees both boats (relay, simulator, or a bridge with a peer)
+// runs the test; see testengine.js. The master sends it commands, and every
+// client, master included, shows the state the server broadcasts.
 let chartVMG = null, chartUP = null;
+const NM_TO_M = 1852;
 
 function testBoats() {
-  // The VMG comparison uses the first two configured boats.
+  // Tests compare the first two configured boats.
   return [...state.rt.values()].slice(0, 2).map((rt) => ({
     id: rt.def.id, name: rt.def.name, color: rt.color, rt,
   }));
+}
+// Server boat index -> our test boat index. The connection a message came in on
+// carries server boat `you`; the other server boat is our other test boat.
+function srvMap(rt, you) {
+  const i = testBoats().findIndex((b) => b.rt === rt);
+  if (i < 0 || (you !== 0 && you !== 1)) return null;
+  const map = []; map[you] = i; map[1 - you] = 1 - i;
+  return map;
+}
+function testBoatForSrv(k) {
+  const t = state.test;
+  return t && t.map ? testBoats()[t.map[k]] || null : null;
+}
+// Server-computed test average of `key` for our boat i (null when none).
+function testAvg(i, key) {
+  const t = state.test; if (!t || !t.avg || !t.map) return null;
+  const k = t.map.indexOf(i); if (k < 0) return null;
+  const v = t.avg[k] && t.avg[k][key];
+  return (v == null || Number.isNaN(v)) ? null : v;
+}
+// Server-computed range/bearing from our boat `from` to our boat `to`.
+function serverRangeBearing(from, to, now) {
+  const s = state.sep;
+  if (!s || s.rangeM == null || now - s.ts > LIVE_MS) return null;
+  const kf = s.map.indexOf(from), kt = s.map.indexOf(to);
+  if (kf < 0 || kt < 0) return null;
+  return { rangeM: s.rangeM, bearingDeg: s.brg[kf] };   // brg[0] is 0→1, brg[1] is 1→0
+}
+
+// The connection to send test commands on: the server running the current
+// test, otherwise the first boat whose server can run tests.
+function engineConn() {
+  const open = (rt) => rt && rt.srv && rt.srv.engine && rt.ws && rt.ws.readyState === 1;
+  const t = state.test;
+  if (t && open(t.via)) return t.via;
+  return testBoats().map((b) => b.rt).find(open) || null;
+}
+function sendTestCmd(op, extra) {
+  if (state.role !== 'master') return false;   // only the master runs tests
+  const rt = engineConn();
+  if (!rt) { alert('No connected server can run tests. It has to see both boats: the cloud relay, the simulator, or a bridge with "peer" set.'); return false; }
+  try { rt.ws.send(JSON.stringify({ ctl: 1, kind: 'testcmd', op, ...extra })); } catch (_) { return false; }
+  return true;
+}
+// Our reference boat, as the server sees it from connection rt: 'self' or 'other'.
+function refFor(rt) {
+  const boats = testBoats();
+  const self = boats.find((b) => b.rt === rt);
+  return self && self.id === testRefId(boats) ? 'self' : 'other';
+}
+let snapReqTs = 0;
+function requestSnapshot(rt) {
+  if (Date.now() - snapReqTs < 1000 || !rt.ws || rt.ws.readyState !== 1) return;
+  snapReqTs = Date.now();
+  try { rt.ws.send(JSON.stringify({ ctl: 1, kind: 'testcmd', op: 'snapshot' })); } catch (_) {}
 }
 
 function startTest(type, durationSec, wpRngNm, wpBrg) {
   const boats = testBoats();
   if (boats.length < 2) { alert('The test compares two boats. Configure both in Settings.'); return; }
-
-  for (const b of boats) b.rt.tavg = {};   // reset strip averages for this test
-
-  state.test = {
-    type, durationSec, startTs: Date.now(), running: true,
-    boats, refId: testRefId(boats), twdRef: null,
-    samples: [], waypoint: null, trimSec: 0, result: null,
-    wp: (type === 'VMG') ? null : { rngM: (wpRngNm || (type === 'VMC' ? 20 : 2)) * NM_TO_M, brg: wpBrg || 0 },
-    series: { primary: [], up: [], fwd: [] },
-    timer: null,
-  };
-
-  $('test-title').textContent = `${type} test`;
-  $('test-duration').textContent = mmss(durationSec);
-  $('test-status').textContent = 'Running';
-  $('test-stop').hidden = false;
-  $('test-review').hidden = true;
-  $('test-view').hidden = false;
-
-  buildRefSwitch(boats);
-  buildTiles(type);
-  if (!chartVMG) chartVMG = new LineChart($('chart-vmg'));
-  if (!chartUP) chartUP = new LineChart($('chart-up'));
-
-  clearInterval(state.test.timer);
-  state.test.timer = setInterval(sampleTest, 1000);
-  sampleTest();
-  broadcastSync();
+  const rt = engineConn();
+  const self = boats.find((b) => b.rt === rt), other = boats.find((b) => b.rt !== rt);
+  sendTestCmd('start', {
+    type, durationSec, wpRngNm, wpBrg,
+    ref: refFor(rt), names: self ? [self.name, other.name] : undefined,
+  });
 }
+function applyTrim() { sendTestCmd('trim', { sec: Math.max(0, parseInt($('trim-sec').value, 10) || 0) }); }
+function saveTest() { if (state.test) sendTestCmd('save', { ref: refFor(engineConn()) }); }
+function discardTest() { sendTestCmd('discard'); }
 
-/* ---------- master → viewer sync ---------- */
-function sendWaypointToBoat(rt, name, lat, lon) {
-  if (!rt || !rt.ws || rt.ws.readyState !== 1) return;
-  try { rt.ws.send(JSON.stringify({ ctl: 1, kind: 'waypoint', name, lat, lon })); } catch (_) {}
-}
-// Push the test waypoint(s) to Expedition on each boat (its bridge forwards them).
-function sendWaypointsToExpedition(t) {
-  if (!t.waypoints) return;
-  if (t.type === 'VMC') {
-    const w = t.waypoints[0]; if (!w) return;
-    for (const b of t.boats) sendWaypointToBoat(b.rt, 'VMC', w.lat, w.lon);   // same distant WP to both boats
-  } else {
-    t.boats.forEach((b, i) => { const w = t.waypoints[i]; if (w) sendWaypointToBoat(b.rt, `TWA_${b.name}`.replace(/\s+/g, '_'), w.lat, w.lon); });
+/* ---------- server → app messages ---------- */
+function handleControl(rt, m) {
+  switch (m.kind) {
+    case 'hello': rt.srv = { engine: !!m.engine }; gateControls(); break;
+    case 'test': onTestState(rt, m); break;
+    case 'sep': onSep(rt, m); break;
+    case 'result': addResult(m.result); break;
+    case 'history': for (const r of m.results || []) addResult(r); break;
   }
 }
-function broadcastControl(obj) {
-  const msg = JSON.stringify({ ctl: 1, ...obj });
-  for (const rt of state.rt.values()) {
-    if (rt.ws && rt.ws.readyState === 1) { try { rt.ws.send(msg); } catch (_) {} }
+function onSep(rt, m) {
+  const map = srvMap(rt, m.you); if (!map) return;
+  state.sep = { rangeM: m.rangeM, brg: m.brg, map, ts: Date.now() };
+}
+// Test state broadcasts are numbered (seq). With two connections to the same
+// server each one arrives twice, so older/equal ones are dropped; a gap (or a
+// restarted server, new boot) asks for a full snapshot.
+function onTestState(rt, m) {
+  if (m.boot !== state.testBoot) {
+    if (!m.snap) { requestSnapshot(rt); return; }
+    state.testBoot = m.boot; state.testSeq = -1;
   }
-}
-function testSyncPayload() {
-  const t = state.test; if (!t) return null;
-  return {
-    type: t.type, startTs: t.startTs, durationSec: t.durationSec,
-    waypoints: t.waypoints || null, wp: t.wp || null,
-    running: !!t.running, trimSec: t.trimSec || 0,
-    status: $('test-status').textContent,
-  };
-}
-function broadcastSync() {
-  if (state.role !== 'master') return;
-  broadcastControl({ kind: 'sync', test: testSyncPayload() });
-}
-function handleControl(m) {
-  if (state.role !== 'viewer') return;           // only viewers mirror
-  if (m.kind === 'sync') applyRemoteSync(m.test);
-  else if (m.kind === 'result') addRemoteResult(m.result);
-}
-function addRemoteResult(r) {
-  if (!r || !r.startTs) return;
-  if (history.some((h) => h.startTs === r.startTs && h.type === r.type)) return;  // dedupe
-  history.unshift(r); saveHistory(); renderHistory();
-}
-function startRemoteTest(rt) {
-  if (state.test) { clearInterval(state.test.timer); }
-  const boats = testBoats();
-  if (boats.length < 2) return;
-  for (const b of boats) b.rt.tavg = {};
-  state.test = {
-    type: rt.type, durationSec: rt.durationSec, startTs: rt.startTs, running: rt.running,
-    boats, refId: testRefId(boats), waypoints: rt.waypoints || null, wp: rt.wp || null,
-    samples: [], trimSec: rt.trimSec || 0, result: null, remote: true,
-    series: { primary: [], up: [], fwd: [] }, timer: null, lastSync: Date.now(),
-  };
-  $('test-title').textContent = `${rt.type} test`;
-  $('test-duration').textContent = mmss(rt.durationSec);
-  $('test-status').textContent = rt.status || 'Running';
-  $('test-stop').hidden = true;                   // viewers have no controls
-  $('test-review').hidden = true;
-  $('test-view').hidden = false;
-  buildRefSwitch(boats);
-  buildTiles(rt.type);
-  if (!chartVMG) chartVMG = new LineChart($('chart-vmg'));
-  if (!chartUP) chartUP = new LineChart($('chart-up'));
-  if (rt.running) state.test.timer = setInterval(sampleTest, 1000);
-  sampleTest();
-}
-function applyRemoteSync(rt) {
-  if (!rt) { if (state.test && state.test.remote) closeTest(); return; }
-  if (!state.test || !state.test.remote || state.test.startTs !== rt.startTs) startRemoteTest(rt);
-  const t = state.test; if (!t || !t.remote) return;
-  t.trimSec = rt.trimSec || 0; t.durationSec = rt.durationSec;
-  if (rt.waypoints) t.waypoints = rt.waypoints;
-  if (rt.wp) t.wp = rt.wp;
-  t.running = rt.running;
-  if (!rt.running && t.timer) { clearInterval(t.timer); t.timer = null; }
-  t.lastSync = Date.now();
-  $('test-status').textContent = rt.status || (rt.running ? 'Running' : 'Stopped');
+  if (m.snap ? m.seq < state.testSeq : m.seq <= state.testSeq) return;
+  if (!m.snap && m.seq !== state.testSeq + 1) { requestSnapshot(rt); return; }
+  const T = m.test;
+  if (!T) { state.testSeq = m.seq; if (state.test) closeTestView(); return; }
+  const map = srvMap(rt, m.you); if (!map) return;
+  const s = T.series;
+  let t = state.test;
+  if (!t || t.id !== T.id) {
+    if (s.from !== 0) { requestSnapshot(rt); return; }
+    t = openTestView(T);
+  }
+  if (s.from > t.rows.length) { requestSnapshot(rt); return; }
+  state.testSeq = m.seq;
+  t.rows.length = s.from;
+  for (const r of s.rows) t.rows.push(r);
+  for (const k of ['type', 'names', 'startTs', 'durationSec', 'running', 'status', 'label', 'trimSec',
+    'elapsedSec', 'wp', 'waypoints', 'twdOverall', 'downwind', 'antisym', 'cur', 'avg']) t[k] = T[k];
+  t.map = map; t.via = rt; t.lastMsg = Date.now();
   renderTest();
 }
 
-function buildRefSwitch(boats) {
+/* ---------- test view ---------- */
+function openTestView(T) {
+  state.test = { id: T.id, type: T.type, rows: [], map: null };
+  $('test-title').textContent = `${T.type} test`;
+  $('test-review').hidden = true;
+  $('test-view').hidden = false;
+  buildRefSwitch();
+  buildTiles(T.type);
+  if (!chartVMG) chartVMG = new LineChart($('chart-vmg'));
+  if (!chartUP) chartUP = new LineChart($('chart-up'));
+  return state.test;
+}
+function closeTestView() {
+  state.test = null;
+  $('test-view').hidden = true;
+  $('test-review').hidden = true;
+  $('ref-switch').innerHTML = '';
+  $('test-meta').innerHTML = '';
+  gateControls();
+}
+
+function buildRefSwitch() {
   const wrap = $('ref-switch'); wrap.innerHTML = '';
   const lab = document.createElement('span'); lab.className = 'ref-switch__label'; lab.textContent = 'Reference';
   wrap.appendChild(lab);
+  const boats = testBoats(), ref = testRefId(boats);
   for (const b of boats) {
     const btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'seg';
     btn.textContent = b.name;
     btn.style.borderColor = b.color;
     btn.dataset.id = b.id;
-    btn.setAttribute('aria-pressed', String(b.id === state.test.refId));
+    btn.setAttribute('aria-pressed', String(b.id === ref));
     btn.addEventListener('click', () => setRef(b.id));   // same per-user setting as the dashboard
     wrap.appendChild(btn);
   }
 }
 function updateRefSwitchPressed() {
-  const t = state.test; if (!t) return;
-  for (const s of $('ref-switch').querySelectorAll('.seg')) s.setAttribute('aria-pressed', String(s.dataset.id === t.refId));
+  if (!state.test) return;
+  const ref = testRefId(testBoats());
+  for (const s of $('ref-switch').querySelectorAll('.seg')) s.setAttribute('aria-pressed', String(s.dataset.id === ref));
 }
 
 const tileEls = {};
 function buildTiles(type) {
   const wrap = $('test-tiles'); wrap.innerHTML = '';
   for (const k of Object.keys(tileEls)) delete tileEls[k];
-  const primary = type === 'VMG' ? 'VMG' : (type === 'VMC' ? 'VMC' : 'TWA');
-  tileEls.dvmg = tile(wrap, 'delta', `${primary} gain`, 'delta');
-  tileEls.rate = tile(wrap, 'delta', `${primary} gain / min`, 'delta');
+  tileEls.dvmg = tile(wrap, 'delta', `${type} gain`, 'delta');
+  tileEls.rate = tile(wrap, 'delta', `${type} gain / min`, 'delta');
   if (type === 'VMG') tileEls.dfwd = tile(wrap, 'delta', 'FWD/BACK gain', 'delta');
   tileEls.dup = tile(wrap, 'delta', 'UP/DOWN gain', 'delta');
 }
@@ -785,19 +760,6 @@ function tile(wrap, boatKey, label, kind) {
   return node;
 }
 
-// --- geometry helpers ---
-function circMeanDeg(vals) {
-  let s = 0, c = 0, n = 0;
-  for (const v of vals) { if (v == null) continue; const r = v * Math.PI / 180; s += Math.sin(r); c += Math.cos(r); n++; }
-  if (!n) return null;
-  return (Math.atan2(s, c) * 180 / Math.PI + 360) % 360;
-}
-function enu(lat, lon, lat0, lon0) {
-  const LAT_M = 111132, lonM = 111320 * Math.cos(lat0 * Math.PI / 180);
-  return { e: (lon - lon0) * lonM, n: (lat - lat0) * LAT_M };
-}
-
-const NM_TO_M = 1852;
 function fmtLatLon(wp) {
   const ll = (v, pos, neg, deg) => {
     const h = v >= 0 ? pos : neg; const a = Math.abs(v);
@@ -806,164 +768,33 @@ function fmtLatLon(wp) {
   };
   return `${ll(wp.lat, 'N', 'S', 2)} ${ll(wp.lon, 'E', 'W', 3)}`;
 }
-function destPoint(lat, lon, brgDeg, distM) {
-  const LAT_M = 111132, lonM = 111320 * Math.cos(lat * Math.PI / 180);
-  const r = brgDeg * Math.PI / 180;
-  return { lat: lat + (distM * Math.cos(r)) / LAT_M, lon: lon + (distM * Math.sin(r)) / lonM };
-}
-// Working samples after trimming the last trimSec seconds.
-function effectiveSamples(t) {
-  if (!t.samples.length) return [];
-  const cut = t.samples[t.samples.length - 1].t - (t.trimSec || 0) * 1000;
-  return t.samples.filter((s) => s.t <= cut);
-}
 
-function sampleTest() {
-  const t = state.test; if (!t || !t.running) return;
-  const now = Date.now();
-  const p = t.boats.map((b) => {
-    const l = b.rt.live;
-    const fresh = l && (now - (l.ts || 0)) < LIVE_MS;
-    return (fresh && l.lat != null && l.lon != null) ? { lat: l.lat, lon: l.lon, twd: l.twd } : null;
-  });
-  if (p[0] && p[1]) {
-    t.samples.push({ t: now, p });
-    // Create the waypoint(s) at the first paired sample (master only; viewers
-    // receive the exact waypoints from the master via sync).
-    if (!t.waypoints && t.wp && !t.remote && t.samples.length >= 1) {
-      const s0 = t.samples[0];
-      const rIdx = Math.max(0, t.boats.findIndex((b) => b.id === t.refId));
-      if (t.type === 'VMC') {
-        // one waypoint from the master (reference) boat's start position
-        const rp = s0.p[rIdx];
-        t.waypoints = [destPoint(rp.lat, rp.lon, t.wp.brg, t.wp.rngM)];
-      } else {
-        // TWA: one waypoint per boat, from each boat's own start position
-        t.waypoints = s0.p.map((pp) => destPoint(pp.lat, pp.lon, t.wp.brg, t.wp.rngM));
-      }
-      sendWaypointsToExpedition(t);
-    }
-  }
-  renderTest();
-  const elapsed = (now - t.startTs) / 1000;
-  $('test-elapsed').textContent = mmss(Math.min(elapsed, t.durationSec));
-  $('test-progress').style.width = `${Math.min(100, (elapsed / t.durationSec) * 100)}%`;
-  if (elapsed >= t.durationSec) finishTest('Complete');
-}
-
-// Per-type gains, following the spec.
-//   VMG:  primary = separation on the TWD axis (sign flips downwind);
-//         FWD/BACK & UP/DOWN from the average-path frame.
-//   VMC:  primary = separation on the bearing to the single (master) waypoint;
-//         UP/DOWN = change in |separation on the perpendicular of that bearing|.
-//   TWA:  primary = (other's distance to its waypoint − ref's distance to its
-//         waypoint); UP/DOWN = change in |separation on the perpendicular of the
-//         target bearing|.  Every GAIN = value(now) − value(start).
-function computeGains(t) {
-  const work = effectiveSamples(t);
-  const refIdx = Math.max(0, t.boats.findIndex((b) => b.id === t.refId));
-  const othIdx = refIdx === 0 ? 1 : 0;
-  const res = { series: { primary: [], up: [], fwd: [] }, cur: null, twdOverall: null, downwind: false, refIdx, othIdx, type: t.type };
-  if (work.length < 1) return res;
-
-  const origin = work[0].p[0];
-  const P = (s, i) => enu(s.p[i].lat, s.p[i].lon, origin.lat, origin.lon);
-  const wpE = t.waypoints ? t.waypoints.map((w) => enu(w.lat, w.lon, origin.lat, origin.lon)) : null;
-
-  const pos0 = [P(work[0], 0), P(work[0], 1)];
-  const sep0 = { e: pos0[refIdx].e - pos0[othIdx].e, n: pos0[refIdx].n - pos0[othIdx].n };
-  const mid0 = { e: (pos0[0].e + pos0[1].e) / 2, n: (pos0[0].n + pos0[1].n) / 2 };
-
-  // VMG downwind sign (overall track vs the wind)
-  let vmgSign = 1;
-  if (t.type === 'VMG') {
-    const allTwd = []; for (const s of work) for (const b of s.p) if (b.twd != null) allTwd.push(b.twd);
-    const twdAll = circMeanDeg(allTwd);
-    if (twdAll != null) {
-      const r = twdAll * Math.PI / 180;
-      const lm = { e: (P(work[work.length - 1], 0).e + P(work[work.length - 1], 1).e) / 2, n: (P(work[work.length - 1], 0).n + P(work[work.length - 1], 1).n) / 2 };
-      if ((lm.e - mid0.e) * Math.sin(r) + (lm.n - mid0.n) * Math.cos(r) < 0) vmgSign = -1;
-    }
-  }
-  res.downwind = vmgSign < 0;
-  const brgRad = (t.wp ? t.wp.brg : 0) * Math.PI / 180;
-  const brgAxis = { x: Math.sin(brgRad), y: Math.cos(brgRad) };
-
-  let sSin = 0, sCos = 0;
-  const addTwd = (s) => { for (const b of s.p) if (b.twd != null) { const r = b.twd * Math.PI / 180; sSin += Math.sin(r); sCos += Math.cos(r); } };
-
-  // returns { adv, perpAbs, fwd, up } for sample k (adv/perpAbs are absolute values, not gains)
-  function calc(k) {
-    const posk = [P(work[k], 0), P(work[k], 1)];
-    const sepk = { e: posk[refIdx].e - posk[othIdx].e, n: posk[refIdx].n - posk[othIdx].n };
-    const midk = { e: (posk[0].e + posk[1].e) / 2, n: (posk[0].n + posk[1].n) / 2 };
-
-    if (t.type === 'VMG') {
-      const twdK = (sSin === 0 && sCos === 0) ? null : (Math.atan2(sSin, sCos) * 180 / Math.PI + 360) % 360;
-      res.twdOverall = twdK;
-      let adv = null, ax = null;
-      if (twdK != null) { const r = twdK * Math.PI / 180; ax = { x: Math.sin(r) * vmgSign, y: Math.cos(r) * vmgSign }; adv = sepk.e * ax.x + sepk.n * ax.y; }
-      let fwd = null, up = null;
-      const aE = midk.e - mid0.e, aN = midk.n - mid0.n, al = Math.hypot(aE, aN);
-      if (al >= 1) {
-        const ux = aE / al, uy = aN / al; let px = -uy, py = ux;
-        if (ax && (px * ax.x + py * ax.y) < 0) { px = -px; py = -py; }
-        const dE = sepk.e - sep0.e, dN = sepk.n - sep0.n;
-        fwd = dE * ux + dN * uy; up = dE * px + dN * py;
-      }
-      return { adv, fwd, up, isDelta: true };   // fwd/up already are deltas
-    }
-
-    if (t.type === 'VMC') {
-      if (!wpE) return { adv: null, perpAbs: null };
-      const wp = wpE[0], vx = wp.e - midk.e, vy = wp.n - midk.n, l = Math.hypot(vx, vy);
-      if (l < 1e-6) return { adv: null, perpAbs: null };
-      const ax = { x: vx / l, y: vy / l };
-      const adv = sepk.e * ax.x + sepk.n * ax.y;
-      const perpAbs = Math.abs(sepk.e * (-ax.y) + sepk.n * ax.x);
-      return { adv, perpAbs };
-    }
-
-    // TWA
-    if (!wpE) return { adv: null, perpAbs: null };
-    const dRef = Math.hypot(wpE[refIdx].e - posk[refIdx].e, wpE[refIdx].n - posk[refIdx].n);
-    const dOth = Math.hypot(wpE[othIdx].e - posk[othIdx].e, wpE[othIdx].n - posk[othIdx].n);
-    const adv = dOth - dRef;   // ref closer to its target ⇒ positive
-    const perpAbs = Math.abs(sepk.e * (-brgAxis.y) + sepk.n * brgAxis.x);
-    return { adv, perpAbs };
-  }
-
-  addTwd(work[0]);
-  const base = calc(0);
-  const adv0 = base.adv != null ? base.adv : 0;
-  const perp0 = base.perpAbs != null ? base.perpAbs : 0;
-
-  let cur = null;
-  for (let k = 1; k < work.length; k++) {
-    addTwd(work[k]);
-    const c = calc(k);
-    const x = (work[k].t - work[0].t) / 1000;
-    let primary = null, up = null, fwd = null;
-    if (c.adv != null) primary = c.adv - adv0;
-    if (t.type === 'VMG') { fwd = c.fwd; up = c.up; }
-    else if (c.perpAbs != null) up = c.perpAbs - perp0;
-    if (primary != null) res.series.primary.push({ x, y: primary });
-    if (up != null) res.series.up.push({ x, y: up });
-    if (fwd != null) res.series.fwd.push({ x, y: fwd });
-    cur = { primary, up, fwd, t: work[k].t };
-  }
-  res.cur = cur;
-  return res;
-}
-
+// Draw the server's test state. The server measures gains from its boat 0;
+// when our reference is its boat 1 the antisymmetric gains change sign.
 function renderTest() {
-  const t = state.test; if (!t) return;
-  const g = computeGains(t);
-  const ref = t.boats[g.refIdx], other = t.boats[g.othIdx];
-  const primaryLabel = t.type === 'VMG' ? 'VMG' : (t.type === 'VMC' ? 'VMC' : 'TWA');
+  const t = state.test; if (!t || !t.map) return;
+  const boats = testBoats(); if (boats.length < 2) return;
+  const refI = Math.max(0, boats.findIndex((b) => b.id === testRefId(boats)));
+  const ref = boats[refI];
+  const flip = t.map.indexOf(refI) !== 0;
+  const sign = (metric) => (flip && t.antisym && t.antisym[metric] ? -1 : 1);
+  const primaryLabel = t.type;
 
-  let meta = `Ref <b style="color:${ref.color}">${ref.name}</b>`;
-  if (t.type === 'VMG') meta += ` · TWD used ${g.twdOverall == null ? '—' : String(Math.round(g.twdOverall)).padStart(3, '0') + '°'}` + (g.downwind ? ' · downwind' : ' · upwind');
+  $('test-title').textContent = `${t.type} test`;
+  $('test-duration').textContent = mmss(t.durationSec);
+  $('test-elapsed').textContent = mmss(t.elapsedSec);
+  $('test-progress').style.width = `${Math.min(100, (t.elapsedSec / t.durationSec) * 100)}%`;
+  $('test-status').textContent = t.label;
+
+  // Only the master gets controls: Stop while running, then trim / save / discard.
+  const isMaster = state.role === 'master';
+  $('test-stop').hidden = !(isMaster && t.running);
+  const review = isMaster && !t.running;
+  if (review && $('test-review').hidden) $('trim-sec').value = String(t.trimSec || 0);
+  $('test-review').hidden = !review;
+
+  let meta = `Ref <b style="color:${ref.color}">${escHTML(ref.name)}</b>`;
+  if (t.type === 'VMG') meta += ` · TWD used ${t.twdOverall == null ? '—' : String(Math.round(t.twdOverall)).padStart(3, '0') + '°'}` + (t.downwind ? ' · downwind' : ' · upwind');
   else if (t.wp) meta += ` · WP ${String(Math.round(t.wp.brg)).padStart(3, '0')}° / ${(t.wp.rngM / NM_TO_M).toFixed(1)} nm` + (t.type === 'TWA' ? ' (per boat)' : ' (from master)');
   $('test-meta').innerHTML = meta;
 
@@ -972,55 +803,64 @@ function renderTest() {
     if (t.type === 'VMC' && t.waypoints && t.waypoints[0]) {
       wpEl.innerHTML = `<span class="wp-item"><span class="wp-tag">VMC waypoint</span> <span class="wp-ll">${fmtLatLon(t.waypoints[0])}</span></span>`;
     } else if (t.type === 'TWA' && t.waypoints) {
-      wpEl.innerHTML = t.boats.map((b, i) => t.waypoints[i]
-        ? `<span class="wp-item"><span class="wp-tag" style="color:${b.color}">Waypoint ${b.name}</span> <span class="wp-ll">${fmtLatLon(t.waypoints[i])}</span></span>` : '').join('');
+      wpEl.innerHTML = t.waypoints.map((w, k) => {
+        const b = testBoatForSrv(k);
+        return w && b ? `<span class="wp-item"><span class="wp-tag" style="color:${b.color}">Waypoint ${escHTML(b.name)}</span> <span class="wp-ll">${fmtLatLon(w)}</span></span>` : '';
+      }).join('');
     } else wpEl.innerHTML = '';
   }
 
   const blank = (k) => setDelta(k, 0, '', '', 0, true);
-  if (!g.cur) { ['dvmg', 'rate', 'dfwd', 'dup'].forEach(blank); t.result = null; }
+  const cur = t.cur;
+  if (!cur) ['dvmg', 'rate', 'dfwd', 'dup'].forEach(blank);
   else {
-    const cur = g.cur;
-    const mins = (cur.t - effectiveSamples(t)[0].t) / 60000;
     if (cur.primary != null) {
-      setDelta('dvmg', cur.primary, 'm', g.downwind ? `${primaryLabel} gain (downwind)` : `${primaryLabel} gain`);
-      setDelta('rate', mins > 0 ? cur.primary / mins : 0, 'm/min', `${primaryLabel} gain ÷ min`, 1);
+      setDelta('dvmg', sign('primary') * cur.primary, 'm', t.downwind ? `${primaryLabel} gain (downwind)` : `${primaryLabel} gain`);
+      setDelta('rate', cur.rate != null ? sign('primary') * cur.rate : 0, 'm/min', `${primaryLabel} gain ÷ min`, 2);
     } else { blank('dvmg'); blank('rate'); }
-    if (t.type === 'VMG') { if (cur.fwd != null) setDelta('dfwd', cur.fwd, 'm', 'along average path'); else blank('dfwd'); }
-    if (cur.up != null) setDelta('dup', cur.up, 'm', t.type === 'VMG' ? 'perp of avg path' : 'perp of WP bearing'); else blank('dup');
-
-    const winner = (cur.primary == null || Math.abs(cur.primary) < 0.05) ? '—' : (cur.primary > 0 ? ref.name : other.name);
-    t.result = {
-      type: t.type, startTs: t.startTs,
-      durationSec: Math.round((cur.t - effectiveSamples(t)[0].t) / 1000),
-      winner, primaryLabel, ref: ref.name,
-      rate: (cur.primary != null && mins > 0) ? cur.primary / mins : null,
-      fwd: cur.fwd, up: cur.up,
-    };
+    if (t.type === 'VMG') { if (cur.fwd != null) setDelta('dfwd', sign('fwd') * cur.fwd, 'm', 'along average path'); else blank('dfwd'); }
+    if (cur.up != null) setDelta('dup', sign('up') * cur.up, 'm', t.type === 'VMG' ? 'perp of avg path' : 'perp of WP bearing'); else blank('dup');
   }
 
-  if (chartVMG) chartVMG.setSeries([{ label: `${primaryLabel} gain`, color: '#0d9488', points: g.series.primary }], { xMax: t.durationSec, includeZero: true });
+  // series rows: [x, primary, up, fwd]
+  const pts = (col, metric) => t.rows.filter((r) => r[col] != null).map((r) => ({ x: r[0], y: sign(metric) * r[col] }));
+  if (chartVMG) chartVMG.setSeries([{ label: `${primaryLabel} gain`, color: '#0d9488', points: pts(1, 'primary') }], { xMax: t.durationSec, includeZero: true });
   if (chartUP) {
-    const s = [{ label: 'UP/DOWN', color: '#0d9488', points: g.series.up }];
-    if (t.type === 'VMG') s.push({ label: 'FWD/BACK', color: '#ea580c', points: g.series.fwd });
+    const s = [{ label: 'UP/DOWN', color: '#0d9488', points: pts(2, 'up') }];
+    if (t.type === 'VMG') s.push({ label: 'FWD/BACK', color: '#ea580c', points: pts(3, 'fwd') });
     chartUP.setSeries(s, { xMax: t.durationSec, includeZero: true });
   }
 
-  renderTestAverages(t);
+  renderTestAverages(boats);
 }
 
-// A row of boxes with each variable's average since the test started (per boat).
-function renderTestAverages(t) {
+// A row of boxes with each variable's average over the test (per boat).
+// Same boxes as AVG_CH, plus HDG-COG (heading minus course, ±180°) right after TWA.
+// (built on demand: AVG_CH is declared further down)
+const testBoxes = () => AVG_CH.flatMap((ch) => ch.key === 'twa' ? [ch, { key: 'hdgcog', label: 'HDG-COG', dp: 0, signed: true }] : [ch]);
+function hdgMinusCog(hdg, cog) { return (hdg == null || cog == null || Number.isNaN(hdg) || Number.isNaN(cog)) ? null : S.norm180(hdg - cog); }
+// Average over the test of `key` for our boat i (HDG-COG from the averaged HDG and COG).
+function boxAvg(i, key) { return key === 'hdgcog' ? hdgMinusCog(testAvg(i, 'hdg'), testAvg(i, 'cog')) : testAvg(i, key); }
+// Latest reading of `key` for a boat (null when it has gone quiet).
+function boxLive(rt, key, now) {
+  if (!rt || !rt.live || !rt.lastTs || now - rt.lastTs > LIVE_MS) return null;
+  if (key === 'hdgcog') return hdgMinusCog(rt.live.hdg, rt.live.cog);
+  const v = key === 'twa' ? twaVal(rt.live) : rt.live[key];
+  return (v == null || Number.isNaN(v)) ? null : v;
+}
+function fmtBox(v, ch) {
+  if (v == null) return '—';
+  return ch.signed ? num(v, ch.dp) : (+v).toFixed(ch.dp);
+}
+function renderTestAverages(boats) {
   const el = $('test-averages'); if (!el) return;
-  const avg = computeTestAverages(t);
-  el.innerHTML = AVG_CH.map((ch) => {
-    const cells = t.boats.map((b, i) => {
-      const v = avg[i] && avg[i][ch.key];
-      const txt = (v == null || Number.isNaN(v)) ? '—' : (+v).toFixed(ch.dp);
-      return `<span class="tavg__v" style="color:${b.color}">${txt}</span>`;
-    }).join('<span class="tavg__sep">/</span>');
-    return `<div class="tavg__box"><span class="tavg__label">${ch.label}</span><div class="tavg__vals">${cells}</div></div>`;
-  }).join('');
+  const now = Date.now();
+  const row = (get, ch) => boats.map((b, i) => `<span class="tavg__v" style="color:${b.color}">${fmtBox(get(b, i), ch)}</span>`).join('<span class="tavg__sep">/</span>');
+  el.innerHTML = testBoxes().map((ch) =>
+    `<div class="tavg__box"><span class="tavg__label">${ch.label}</span>` +
+    `<div class="tavg__vals" title="Average over the test"><span class="tavg__tag">A</span>${row((b, i) => boxAvg(i, ch.key), ch)}</div>` +
+    `<div class="tavg__live" title="Live reading"><span class="tavg__tag">L</span>${row((b) => boxLive(b.rt, ch.key, now), ch)}</div></div>`
+  ).join('');
 }
 
 function setDelta(key, value, unit, sub, dp, blank) {
@@ -1032,101 +872,75 @@ function setDelta(key, value, unit, sub, dp, blank) {
     el.querySelector('.tile__sub').textContent = '';
     return;
   }
-  const num = value.toFixed(dp || 0);
+  const num = value.toFixed(dp == null ? 1 : dp);
   v.textContent = `${value >= 0 ? '+' : '−'}${Math.abs(+num)} ${unit}`;
   v.classList.toggle('pos', value > 0.5);
   v.classList.toggle('neg', value < -0.5);
   el.querySelector('.tile__sub').textContent = sub;
 }
 
-function finishTest(label) {
-  const t = state.test; if (!t) return;
-  clearInterval(t.timer); t.timer = null; t.running = false;
-  $('test-status').textContent = label;
-  $('test-stop').hidden = true;
-  if (t.remote) { $('test-review').hidden = true; renderTest(); return; }
-  $('test-review').hidden = false;
-  $('trim-sec').value = String(t.trimSec || 0);
-  renderTest();
-  broadcastSync();
-}
-function applyTrim() {
-  const t = state.test; if (!t) return;
-  t.trimSec = Math.max(0, parseInt($('trim-sec').value, 10) || 0);
-  $('test-status').textContent = t.trimSec > 0 ? `Trimmed −${t.trimSec}s` : 'Stopped';
-  renderTest();
-  broadcastSync();
-}
-function saveTest() {
-  const t = state.test; if (!t) return;
-  renderTest();
-  if (t.result) {
-    t.result.avg = computeTestAverages(t);
-    t.result.boats = t.boats.map((b) => b.name);
-    t.result.colors = t.boats.map((b) => b.color);
-    history.unshift(t.result); saveHistory(); renderHistory();
-    const r = t.result;
-    broadcastControl({ kind: 'result', result: r });                       // send the row to viewers
-    setTimeout(() => broadcastControl({ kind: 'result', result: r }), 700); // resend once for reliability
-  }
-  closeTest();
-}
-function closeTest() {
-  if (state.role === 'master') broadcastControl({ kind: 'sync', test: null });
-  if (state.test) clearInterval(state.test.timer);
-  state.test = null;
-  $('test-view').hidden = true;
-  $('test-review').hidden = true;
-  $('ref-switch').innerHTML = '';
-  $('test-meta').innerHTML = '';
-  gateControls();
-}
-
-// Heartbeat: masters re-broadcast the live test so late-joining viewers catch up;
-// viewers drop a mirrored test if the master's sync goes silent.
+// Flag a test view whose server has gone quiet (it keeps the last state shown).
 setInterval(() => {
-  if (state.role === 'master' && state.test) broadcastSync();
-  if (state.role === 'viewer' && state.test && state.test.remote && Date.now() - (state.test.lastSync || 0) > 6000) closeTest();
+  const t = state.test;
+  if (t && Date.now() - (t.lastMsg || 0) > 6000) $('test-status').textContent = 'No update from the server';
 }, 1500);
 
-// Whole-test average of each channel, per boat, over the (trimmed) test window.
+// Columns of the test averages row and the history table (the server averages every channel).
 const AVG_CH = [
-  { key: 'bsp', label: 'BS', angular: false, dp: 1 },
-  { key: 'tws', label: 'TWS', angular: false, dp: 1 },
-  { key: 'twd', label: 'TWD', angular: true, dp: 0 },
-  { key: 'twa', label: 'TWA', angular: false, dp: 0 },
-  { key: 'hdg', label: 'HDG', angular: true, dp: 0 },
-  { key: 'cog', label: 'COG', angular: true, dp: 0 },
-  { key: 'sog', label: 'SOG', angular: false, dp: 1 },
-  { key: 'heel', label: 'HEEL', angular: false, dp: 1 },
-  { key: 'rudder', label: 'RUD', angular: false, dp: 1 },
+  { key: 'bsp', label: 'BS', dp: 2 },
+  { key: 'tws', label: 'TWS', dp: 1 },
+  { key: 'twd', label: 'TWD', dp: 0 },
+  { key: 'twa', label: 'TWA', dp: 0 },
+  { key: 'hdg', label: 'HDG', dp: 0 },
+  { key: 'cog', label: 'COG', dp: 0 },
+  { key: 'sog', label: 'SOG', dp: 2 },
+  { key: 'heel', label: 'HEEL', dp: 1 },
+  { key: 'rudder', label: 'RUD', dp: 1 },
 ];
-function computeTestAverages(t) {
-  const eff = effectiveSamples(t);
-  const endT = eff.length ? eff[eff.length - 1].t : Date.now();
-  return t.boats.map((b) => {
-    const hist = (b.rt.hist || []).filter((h) => h.t >= t.startTs && h.t <= endT);
-    const o = {};
-    for (const ch of AVG_CH) {
-      let s = 0, c = 0, sum = 0, n = 0;
-      for (const h of hist) { const v = h[ch.key]; if (v == null || Number.isNaN(v)) continue; n++; sum += v; const r = v * Math.PI / 180; s += Math.sin(r); c += Math.cos(r); }
-      o[ch.key] = n ? (ch.angular ? (Math.atan2(s, c) * 180 / Math.PI + 360) % 360 : sum / n) : null;
-    }
-    return o;
-  });
-}
 
 /* ---------- test history ---------- */
+// Results are computed and kept by the server, which sends them as they are
+// saved and again to every client that connects; each device keeps its copy.
 const HISTORY_KEY = 'boat-receiver:history:v1';
+const HISTCLEAR_KEY = 'boat-receiver:histclear:v1';   // results up to this start time were cleared here
 let history = [];
-function loadHistory() { try { const r = localStorage.getItem(HISTORY_KEY); if (r) history = JSON.parse(r); } catch (_) { history = []; } }
+let histClearedAt = 0;
+function loadHistory() {
+  try { const r = localStorage.getItem(HISTORY_KEY); if (r) history = JSON.parse(r); } catch (_) { history = []; }
+  try { histClearedAt = +localStorage.getItem(HISTCLEAR_KEY) || 0; } catch (_) {}
+}
 function saveHistory() { try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 200))); } catch (_) {} }
 function clearHistory() {
   if (!history.length) return;
   if (!confirm('Clear all saved test results?')) return;
+  histClearedAt = Math.max(Date.now(), ...history.map((r) => r.startTs || 0));
+  try { localStorage.setItem(HISTCLEAR_KEY, String(histClearedAt)); } catch (_) {}
   history = []; saveHistory(); renderHistory();
 }
+function addResult(r) {
+  if (!r || !r.startTs || r.startTs <= histClearedAt) return;
+  if (history.some((h) => h.startTs === r.startTs && h.type === r.type)) return;   // dedupe
+  if (!r.colors && Array.isArray(r.boats)) {
+    // colour each boat as this device does (matched by name)
+    r.colors = r.boats.map((n, i) => { const rt = [...state.rt.values()].find((x) => x.def.name === n); return rt ? rt.color : COLORS[i % COLORS.length]; });
+  }
+  history.push(r);
+  history.sort((a, b) => b.startTs - a.startTs);
+  saveHistory(); renderHistory();
+}
 function fmtDateTime(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function fmtDate(ts) {
+  const d = new Date(ts); const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(-2)} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+// Point of sail and tack from the reference boat's average TWA (positive TWA = wind from port).
+function modeTack(r) {
+  const i = r.boats ? Math.max(0, r.boats.indexOf(r.ref)) : 0;
+  const twa = r.avg && r.avg[i] ? r.avg[i].twa : null;
+  if (twa == null || Number.isNaN(twa)) return { mode: '—', tack: '—' };
+  const a = Math.abs(twa);
+  return { mode: a <= 60 ? 'Upwind' : a <= 130 ? 'Reaching' : 'Downwind', tack: twa < 0 ? 'Stbd' : 'Port' };
+}
 function num(v, dp) { return (v == null || Number.isNaN(v)) ? '—' : (v >= 0 ? '+' : '−') + Math.abs(+v.toFixed(dp)); }
 function avgCellHTML(r, key, dp) {
   const c = r.colors || ['#8fb0c4', '#8fb0c4'];
@@ -1153,9 +967,12 @@ function renderHistory() {
     const winnerColor = r.colors && r.boats ? (r.winner === r.boats[0] ? r.colors[0] : r.winner === r.boats[1] ? r.colors[1] : '') : '';
     const add = (html) => { const td = document.createElement('td'); td.innerHTML = html; tr.appendChild(td); };
     const esc = (s) => String(s).replace(/</g, '&lt;');
-    add(esc(fmtDateTime(r.startTs)));
-    add(esc(r.type));
+    const mt = modeTack(r);
+    add(esc(fmtDate(r.startTs)));
     add(esc(mmss(r.durationSec)));
+    add(esc(r.type));
+    add(mt.mode);
+    add(mt.tack);
     add(winnerColor ? `<b style="color:${winnerColor}">${esc(r.winner)}</b>` : esc(r.winner));
     add(r.ref ? esc(r.ref) : '—');
     add(r.rate == null ? '—' : `${num(r.rate, 1)} m/min`);
@@ -1166,13 +983,14 @@ function renderHistory() {
   }
 }
 function exportCSV() {
-  const head = ['Date', 'Type', 'Duration', 'Winner', 'Reference', 'Gain rate (m/min)', 'FWD/BACK (m)', 'UP/DOWN (m)'];
+  const head = ['Date', 'Duration', 'Type', 'Mode', 'Tack', 'Winner', 'Reference', 'Gain rate (m/min)', 'FWD/BACK (m)', 'UP/DOWN (m)'];
   for (const bi of [0, 1]) for (const ch of AVG_CH) head.push(`Boat${bi + 1} avg ${ch.label}`);
   head.push('Boat1 name', 'Boat2 name');
   const val = (x, dp) => (x == null || Number.isNaN(x)) ? '' : (+x).toFixed(dp);
   const rows = history.map((r) => {
+    const mt = modeTack(r);
     const row = [
-      fmtDateTime(r.startTs), r.type, mmss(r.durationSec), r.winner, r.ref || '',
+      fmtDate(r.startTs), mmss(r.durationSec), r.type, mt.mode, mt.tack, r.winner, r.ref || '',
       r.rate == null ? '' : r.rate.toFixed(1),
       r.fwd == null ? '' : r.fwd.toFixed(0),
       r.up == null ? '' : r.up.toFixed(0),
@@ -1212,9 +1030,9 @@ $('btn-vmg').addEventListener('click', () => { if (state.role === 'master') open
 $('btn-vmc').addEventListener('click', () => { if (state.role === 'master') openSetup('VMC'); });
 $('btn-twa').addEventListener('click', () => { if (state.role === 'master') openSetup('TWA'); });
 
-$('test-stop').addEventListener('click', () => finishTest('Stopped'));
+$('test-stop').addEventListener('click', () => sendTestCmd('stop'));
 $('trim-apply').addEventListener('click', applyTrim);
-$('test-discard').addEventListener('click', closeTest);
+$('test-discard').addEventListener('click', discardTest);
 $('test-save').addEventListener('click', saveTest);
 $('export-csv').addEventListener('click', exportCSV);
 $('clear-history').addEventListener('click', clearHistory);

@@ -13,6 +13,11 @@ against a simulator, then deploy unchanged to the nav PCs.
 - **`bridge/`** — the on-boat server: reads Expedition's UDP and re-serves it as a
   WebSocket, and serves the app over http. See `bridge/README.md`.
 
+The **tests run on the server**, not in the browser: whichever server sees both
+boats (the cloud relay, the simulator, or a bridge with `peer` set) computes the
+gains, averages, boat separation and saved results (`testengine.js`) and sends the
+same numbers to every connected app.
+
 The app connects the same way to the simulator or to the bridges, so nothing in
 the app changes between the desk and the boat.
 
@@ -54,9 +59,9 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
 ## Using the app
 
 1. **Pick a role.** The first screen asks master or viewer. The **master** runs
-   the tests; **viewers** watch and their screen **mirrors the master's running
-   test** — start, stop, duration, waypoint and trim all follow
-   the master live (see "Master → viewer sync" below). Change it later in Settings.
+   the tests; **viewers** watch the same test, computed once on the server — start,
+   stop, duration, waypoint, trim and results all follow the master live (see
+   "Server-side tests" below). Change it later in Settings.
 2. **Pick your reference boat.** The **Reference** switch above the map sets
    which boat everything relative is measured from: range & bearing (to each
    other boat), the range lines on the map (the reference boat has a ring), and
@@ -104,7 +109,8 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
      latitude/longitude is shown at the top of the test view ("VMC waypoint …",
      or "Waypoint <boat> …" per boat for TWA) and drawn as a diamond on the map.
      Each waypoint is also **sent to Expedition on the relevant boat** as a WPL
-     sentence: the app pushes it to that boat's bridge, which forwards it over UDP.
+     sentence: the server that runs the test sends it to that boat's bridge, which
+     forwards it over UDP.
      Set `"expedition": { "host": "127.0.0.1", "port": N }` in `bridge/config.json`
      to the host/port Expedition is configured to read NMEA input on (leave the
      port unset and the bridge just logs the waypoint).
@@ -122,16 +128,20 @@ cd bridge && npm install && npm start           # terminal 2: serves the app
      tiles); if you later want a geographic basemap where there's signal, that can
      be added.
    - **Strip charts** — one trace per boat, with each boat's current value in the
-     header and its **average since the test started** in a box beside the chart.
+     header and its **average over the test** (computed by the server) in a box
+     beside the chart.
      Add or remove strips with **+ Add** / the **×** on each, choosing from the
      variables in the feed (SOG, BS, COG, HDG, TWA, AWA, TWD, TWS, AWS, HEEL,
      RUDDER, PITCH). The **time window** (1 / 5 / 10 / 20 min) is selectable at the
      top. Your choice of strips and window is saved on the device.
 6. **Test history** — at the bottom of the page, one row per saved test: date &
    time, type (VMG/VMC/TWA), duration, winner, gain rate, FWD/BACK, UP/DOWN, and
-   the whole-test averages of **BS, TWS, TWD, HDG, COG, SOG, HEEL, RUDDER**, each
+   the whole-test averages of **BS, TWS, TWD, TWA, HDG, COG, SOG, HEEL, RUDDER**, each
    shown as the two boats by **colour** (a legend maps colour to boat name). **Export CSV** downloads everything (each average as a
-   separate per-boat column); **Clear** empties the history. Stored on the device.
+   separate per-boat column); **Clear** empties the history on this device. The
+   server computes each row when the master saves, sends it to every app, and
+   re-sends the results it holds (since it started) to apps that connect later.
+   Each device keeps its own copy.
 
 The simulator now also sends boat speed (`VHW`), heel (`XDR/ROLL`) and rudder
 (`RSA`) so all six strips have data on the desk. On a real boat these come from
@@ -149,22 +159,43 @@ Per boat PC: install the `bridge/`, point Expedition's UDP at it, and run it (se
 `bridge/README.md`). Then in the app's **Settings**, set the two boats to each
 bridge's address, e.g. `ws://192.168.1.101:8080` and `ws://192.168.1.102:8080`.
 
-## Master → viewer sync
+On a LAN without the cloud relay, the tests need a bridge that sees **both**
+boats: set `"peer"` in one bridge's `config.json` (or both) to the other bridge's
+address (e.g. `"peer": "ws://192.168.1.102:8080"`). The app sends tests to the
+first boat whose bridge can run them. Without a peer the test buttons stay
+disabled. With the cloud relay (`DEPLOY.md`), the relay
+runs the tests and no `peer` is needed.
 
-Viewers mirror the master's test automatically. The master broadcasts the test
-state — type, start time, duration, waypoint(s), running/stopped and trim — as small JSON control messages over the **same boat WebSockets**. The
-bridge (and the simulator) **relay** each client's message to the other connected
-clients, so viewers receive it. Each viewer then reconstructs the test in mirror
-from its **own** identical boat feed plus those parameters, so only the light
-parameters travel, not the full sample stream.
+## Server-side tests
 
-A viewer's test view is read-only: the Stop/Trim/Save/Discard controls are
-hidden (the reference switch stays, as each user picks their own reference), and it follows the master's Stop, trim
-and Close. The master re-sends the state every ~1.5 s as a heartbeat, so a viewer
-that joins after a test has started still catches up; if the master's sync goes
-silent for a few seconds the viewer drops the mirrored test. This needs every
-client to share at least one bridge (normally all connect to both boats), and the
-bridge/simulator relay to be running (both included here).
+Every test runs on **one server**, so the master and all viewers see exactly the
+same gains, averages and results, whatever their connection quality:
+
+| Topology | Who runs the tests |
+| --- | --- |
+| Develop | the simulator (it serves both boats) |
+| Cloud | the relay, one engine per `room` |
+| LAN | a bridge with `peer` set to the other bridge |
+
+The engine (`testengine.js`, shared by all three) reads both boats' raw feeds with
+the same parser as the app (`feedparse.js`). Once a second it samples both
+positions, works out the gains (definitions above), and samples every channel for
+the averages twice a second. It sends the state to every app: gains, chart series
+(only the new points), averages, waypoints, status, and the range and bearing
+between the boats. When the master saves, the server builds the history row
+(winner, gain rate, FWD/BACK, UP/DOWN, averages) and sends it to everyone.
+
+The master's Start / Stop / Trim / Save / Discard buttons send commands to that
+server; viewers get no controls. A viewer that connects mid-test gets the full
+state straight away. If the master closes their browser, the test keeps running
+on the server, and a master can reopen the app to stop and save it. A stopped
+test that nobody saves or discards is dropped after an hour.
+
+The **reference boat** is still each user's own choice. The server measures gains
+from its first boat. When your reference is the other boat, the app flips the sign
+of the gains that are measured boat-to-boat (all gains, except UP/DOWN for VMC/TWA,
+which uses the absolute sideways separation). Saved results use the master's
+reference at the moment they press Save.
 
 ## Add to the git repo
 

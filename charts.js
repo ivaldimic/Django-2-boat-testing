@@ -87,7 +87,7 @@
         ctx.strokeStyle = CSS.grid;
         ctx.beginPath(); ctx.moveTo(mL, py); ctx.lineTo(W - mR, py); ctx.stroke();
         ctx.fillStyle = CSS.text;
-        ctx.fillText(v.toFixed(Math.abs(yMax - yMin) < 5 ? 1 : 0), mL - 6, py);
+        ctx.fillText(v.toFixed(Math.abs(yMax - yMin) < 5 ? 2 : 1), mL - 6, py);
       }
 
       // x ticks (time)
@@ -165,7 +165,7 @@
     draw() {
       const ctx = this.ctx, W = this.W, H = this.H;
       ctx.clearRect(0, 0, W, H);
-      const mL = 34, mR = 6, mT = 6, mB = 6;
+      const mL = this.opts.axisDp ? 44 : 34, mR = 6, mT = 6, mB = 6;   // wider when the axis shows decimals
       const pw = W - mL - mR, ph = H - mT - mB;
       if (pw <= 0 || ph <= 0) return;
 
@@ -193,8 +193,9 @@
       // y labels (min/max)
       ctx.font = '10px ui-monospace, Menlo, monospace';
       ctx.fillStyle = '#8b9aa8'; ctx.textAlign = 'right';
-      ctx.textBaseline = 'top'; ctx.fillText(yMax.toFixed(0), mL - 4, mT);
-      ctx.textBaseline = 'bottom'; ctx.fillText(yMin.toFixed(0), mL - 4, H - mB);
+      const adp = this.opts.axisDp || 0;
+      ctx.textBaseline = 'top'; ctx.fillText(yMax.toFixed(adp), mL - 4, mT);
+      ctx.textBaseline = 'bottom'; ctx.fillText(yMin.toFixed(adp), mL - 4, H - mB);
 
       // baseline grid
       ctx.strokeStyle = 'rgba(30,55,80,0.08)';

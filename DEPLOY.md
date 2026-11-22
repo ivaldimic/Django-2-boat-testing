@@ -6,8 +6,10 @@ hundreds of km away** — with just a link, no software to install.
 
 Everything connects **outbound** to one small cloud server (the *relay*), so
 Starlink CGNAT, 5G and home firewalls are not a problem. The relay also **serves
-the web app**, so there is a single URL for everything. Waypoints for VMC/TWA
-tests travel back down through the relay to each boat's Expedition.
+the web app**, so there is a single URL for everything. The relay also **runs
+the tests** for each room, so the master and every viewer see the same numbers.
+Waypoints for VMC/TWA tests travel back down through the relay to each boat's
+Expedition.
 
 ```
  Boat 1 (Starlink)                              Boat 2 (Starlink)
@@ -101,8 +103,9 @@ https://boat-relay-xxxx.onrender.com/?role=master&room=team&token=PASTE_VIEW_TOK
 ```
 
 It opens straight into **master** mode, connected through the cloud. Run VMG/VMC/
-TWA tests as usual; the VMC/TWA waypoints are sent down to **both** boats'
-Expedition automatically.
+TWA tests as usual. The relay computes them and sends the VMC/TWA waypoints down to
+**both** boats' Expedition automatically. If the master's connection drops, the
+test keeps running on the relay. Reopen the link to stop and save it.
 
 ---
 
@@ -114,8 +117,9 @@ Send anyone this single link (phone, tablet or laptop; 5G or home internet):
 https://boat-relay-xxxx.onrender.com/?role=viewer&room=team&token=PASTE_VIEW_TOKEN
 ```
 
-They open it and immediately see the live dashboard and **mirror the master's
-running test** — no install, no settings. Tip: on a phone, "Add to Home Screen"
+They open it and immediately see the live dashboard and the **master's running
+test**, with the same gains, averages and results the relay sends to everyone. No
+install, no settings. Tip: on a phone, "Add to Home Screen"
 makes it feel like an app.
 
 > Want an easy-to-type address instead of the `onrender.com` name? In Render →
@@ -142,10 +146,12 @@ makes it feel like an app.
 ## Hybrid (optional): fast LAN on board, cloud for the rest
 
 The bridge still serves the app on the boat's LAN (`http://<boat-ip>:8080`) and
-relays LAN clients directly. On board you can use that for lowest latency; the
+serves LAN clients directly. On board you can use that for lowest latency; the
 cloud relay is what makes the **other boat**, the **dinghy** and **home** work.
 Because each device's connection URLs are independent, some can be local and
-others cloud at the same time.
+others cloud at the same time. A test runs on one server only, so devices
+watching a relay test should connect through the relay. A LAN-only test needs a
+bridge with `peer` set (see `bridge/README.md`).
 
 ## Data volumes
 
