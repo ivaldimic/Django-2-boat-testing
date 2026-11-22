@@ -82,8 +82,8 @@
     const lines = String(text).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     return lines.length ? lines : [String(text).trim()];
   }
-  // TWA from course and wind when both are known, otherwise the instrument TWA.
-  function twaVal(l) { return (l.cog != null && l.twd != null) ? S.twa(l.cog, l.twd) : l.twa; }
+  // TWA as reported by Expedition (channel 4) — never recomputed from COG/TWD.
+  function twaVal(l) { return l.twa; }
   // Keys whose values are compass directions (averaged on the circle).
   const ANGULAR_KEYS = new Set(['cog', 'hdg', 'twd']);
   function isAngular(key) {
