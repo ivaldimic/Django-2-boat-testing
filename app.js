@@ -958,13 +958,14 @@ function fmtDate(ts) {
   const d = new Date(ts); const p = (n) => String(n).padStart(2, '0');
   return `${p(d.getDate())}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(-2)} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
-// Point of sail and tack from the reference boat's average TWA (positive TWA = wind from port).
+// Point of sail and tack from the reference boat's average TWA (Expedition TWA: positive = wind from starboard).
 function modeTack(r) {
   const i = r.boats ? Math.max(0, r.boats.indexOf(r.ref)) : 0;
   const twa = r.avg && r.avg[i] ? r.avg[i].twa : null;
   if (twa == null || Number.isNaN(twa)) return { mode: '—', tack: '—' };
-  const a = Math.abs(twa);
-  return { mode: a <= 60 ? 'Upwind' : a <= 130 ? 'Reaching' : 'Downwind', tack: twa < 0 ? 'Stbd' : 'Port' };
+  // |TWA| in whole degrees: Upwind 0-60, Reaching 61-125, Downwind 126-180
+  const a = Math.round(Math.abs(twa));
+  return { mode: a <= 60 ? 'Upwind' : a <= 125 ? 'Reaching' : 'Downwind', tack: twa < 0 ? 'Port' : 'Stbd' };
 }
 function num(v, dp) { return (v == null || Number.isNaN(v)) ? '—' : (v >= 0 ? '+' : '−') + Math.abs(+v.toFixed(dp)); }
 function avgCellHTML(r, key, dp) {

@@ -7,7 +7,7 @@
     "port": 5550
   },
   "expeditionBoat": 0,
-  "channelsFile": "channels.xml",
+  "channelsFile": "channels_XLI.xml",
   "relay": {
     "url": "wss://boat-relay.onrender.com",
     "room": "team",
