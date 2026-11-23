@@ -769,6 +769,27 @@ function fmtLatLon(wp) {
   return `${ll(wp.lat, 'N', 'S', 2)} ${ll(wp.lon, 'E', 'W', 3)}`;
 }
 
+// Range / bearing from each boat's live position to the waypoint it has to reach.
+let wpSteerItems = [];
+function updateWpSteer() {
+  const wpEl = $('test-waypoints'); if (!wpEl) return;
+  const now = Date.now();
+  for (const box of wpEl.querySelectorAll('.wp-steer')) {
+    const it = wpSteerItems[+box.dataset.n]; if (!it) continue;
+    const rt = it.boat.rt, l = rt && rt.live;
+    const ok = l && rt.lastTs && now - rt.lastTs <= LIVE_MS && Number.isFinite(l.lat) && Number.isFinite(l.lon);
+    let rng = '—', brg = '—';
+    if (ok) {
+      const rb = S.rangeBearing(l.lat, l.lon, it.wp.lat, it.wp.lon);
+      rng = rb.rangeM >= 1852 ? `${(rb.rangeM / NM_TO_M).toFixed(2)} nm` : `${Math.round(rb.rangeM)} m`;
+      brg = `${String(Math.round(rb.bearingDeg) % 360).padStart(3, '0')}°`;
+    }
+    box.querySelector('.wp-rng').textContent = rng;
+    box.querySelector('.wp-brg').textContent = brg;
+  }
+}
+setInterval(updateWpSteer, 1000);
+
 // Draw the server's test state. The server measures gains from its boat 0;
 // when our reference is its boat 1 the antisymmetric gains change sign.
 function renderTest() {
@@ -798,16 +819,20 @@ function renderTest() {
   else if (t.wp) meta += ` · WP ${String(Math.round(t.wp.brg)).padStart(3, '0')}° / ${(t.wp.rngM / NM_TO_M).toFixed(1)} nm` + (t.type === 'TWA' ? ' (per boat)' : ' (from master)');
   $('test-meta').innerHTML = meta;
 
+  // One box per boat next to the waypoint label: range and bearing to steer.
   const wpEl = $('test-waypoints');
   if (wpEl) {
+    let items = [];
     if (t.type === 'VMC' && t.waypoints && t.waypoints[0]) {
-      wpEl.innerHTML = `<span class="wp-item"><span class="wp-tag">VMC waypoint</span> <span class="wp-ll">${fmtLatLon(t.waypoints[0])}</span></span>`;
+      items = boats.map((b) => ({ tag: 'VMC waypoint', boat: b, wp: t.waypoints[0] }));
     } else if (t.type === 'TWA' && t.waypoints) {
-      wpEl.innerHTML = t.waypoints.map((w, k) => {
-        const b = testBoatForSrv(k);
-        return w && b ? `<span class="wp-item"><span class="wp-tag" style="color:${b.color}">Waypoint ${escHTML(b.name)}</span> <span class="wp-ll">${fmtLatLon(w)}</span></span>` : '';
-      }).join('');
-    } else wpEl.innerHTML = '';
+      items = t.waypoints.map((w, k) => ({ tag: 'Waypoint', boat: testBoatForSrv(k), wp: w })).filter((it) => it.wp && it.boat);
+    }
+    wpEl.innerHTML = items.map((it, n) =>
+      `<span class="wp-item"><span class="wp-tag" style="color:${it.boat.color}">${it.tag} ${escHTML(it.boat.name)}</span> <span class="wp-ll">${fmtLatLon(it.wp)}</span>` +
+      `<span class="wp-steer" data-n="${n}"><span class="wp-steer__f">RNG <b class="wp-rng">—</b></span><span class="wp-steer__f">BRG <b class="wp-brg">—</b></span></span></span>`).join('');
+    wpSteerItems = items;
+    updateWpSteer();
   }
 
   const blank = (k) => setDelta(k, 0, '', '', 0, true);
