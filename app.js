@@ -771,6 +771,7 @@ function fmtLatLon(wp) {
 
 // Range / bearing from each boat's live position to the waypoint it has to reach.
 let wpSteerItems = [];
+const WP_BOAT_COLORS = ['#16a34a', '#f97316'];   // boat 1 green, boat 2 orange
 function updateWpSteer() {
   const wpEl = $('test-waypoints'); if (!wpEl) return;
   const now = Date.now();
@@ -830,7 +831,7 @@ function renderTest() {
     }
     wpEl.innerHTML = items.map((it, n) =>
       `<span class="wp-item"><span class="wp-tag" style="color:${it.boat.color}">${it.tag} ${escHTML(it.boat.name)}</span> <span class="wp-ll">${fmtLatLon(it.wp)}</span>` +
-      `<span class="wp-steer" data-n="${n}"><span class="wp-steer__f">RNG <b class="wp-rng">—</b></span><span class="wp-steer__f">BRG <b class="wp-brg">—</b></span></span></span>`).join('');
+      `<span class="wp-steer" data-n="${n}" style="border-color:${WP_BOAT_COLORS[boats.findIndex((x) => x.id === it.boat.id)] || it.boat.color}"><span class="wp-steer__f">RNG<b class="wp-rng">—</b></span><span class="wp-steer__f">BRG<b class="wp-brg">—</b></span></span></span>`).join('');
     wpSteerItems = items;
     updateWpSteer();
   }

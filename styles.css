@@ -157,9 +157,10 @@ h1,h2,h3 { margin: 0; }
 .testavg .tavg__sep { color: var(--ink-faint); margin: 0 3px; }
 .wp-item { display: inline-flex; align-items: baseline; gap: 6px; }
 .wp-tag { font-weight: 700; letter-spacing: 0.03em; }
-.wp-steer { display: inline-flex; gap: 10px; margin-left: 8px; padding: 3px 9px; background: var(--bg-grid); border: 1px solid var(--panel-edge); border-radius: 8px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
-.wp-steer__f { font-size: 10px; letter-spacing: 0.08em; color: var(--ink-faint); }
-.wp-steer__f b { font-size: 15px; color: var(--ink); letter-spacing: 0; }
+.wp-item { align-items: center; }
+.wp-steer { display: inline-flex; flex-direction: column; justify-content: center; gap: 3px; width: 100px; height: 100px; box-sizing: border-box; margin-left: 8px; padding: 6px; background: var(--bg-grid); border: 3px solid var(--ink-faint); border-radius: 8px; text-align: center; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.wp-steer__f { display: flex; flex-direction: column; font-size: 10px; letter-spacing: 0.1em; color: var(--ink-faint); }
+.wp-steer__f b { font-size: 20px; line-height: 1.1; color: var(--ink); letter-spacing: 0; }
 .wp-ll { font-family: var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
 .testview__controls { display: flex; gap: 8px; align-items: center; }
 .ref-switch { display: flex; align-items: center; gap: 6px; margin-right: 4px; }
