@@ -75,6 +75,11 @@ Settings drawer (saved in localStorage), or are generated from URL params
     it to that boat's publisher. The bridge turns it into an `ECWPL` sentence and
     sends it over UDP to `config.expedition.host:port`, or forwards it to its peer
     bridge for the other boat.
+  - `kind: 'hb'` (server → app, every 5 s): heartbeat, ignored except that
+    it counts as traffic. The app reconnects a socket that receives nothing for
+    15 s (`checkSockets`). `wsalive.js` (repo root) holds the server side: it
+    pings every client, terminates the ones that stop answering, and gives the
+    bridge's uplink/peer clients the same dead-link detection.
 - The servers no longer forward client messages to other clients.
 - If you change the message shapes, update `app.js`, `testengine.js`,
   `bridge/bridge.js`, `simulator/simulator.js` and `relay/server.js` together.

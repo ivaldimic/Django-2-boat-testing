@@ -13,6 +13,8 @@ const LIVE_MS = 3000;
 const DELAY_MS = 10000;          // 3–10 s since the last fix: delayed (yellow)
 const LONG_DELAY_MS = 30000;     // 10–30 s: long delay (orange); beyond that: no data (red)
 const RECONNECT_MAX_MS = 8000;
+const CONNECT_TIMEOUT_MS = 10000; // give up on a handshake that hangs
+const SILENT_MS = 15000;          // open but nothing at all received (servers send a heartbeat every 5 s): reconnect
 const COLORS = ['#0d9488', '#ea580c', '#7c3aed', '#0369a1'];
 const STRIP_WINDOW_MS = 120000;   // default strip window (2 minutes)
 const HIST_MS = 1210000;          // keep ~20 min so the 20-minute window works
@@ -52,7 +54,7 @@ function applyBoats(list) {
   for (const rt of state.rt.values()) {
     rt.closing = true;
     clearTimeout(rt.timer);
-    if (rt.ws) { try { rt.ws.close(); } catch (_) {} }
+    dropSocket(rt);
   }
   state.rt.clear();
   state.boats = list;
@@ -128,20 +130,41 @@ function makeStream(def) {
 }
 
 function connect(rt) {
+  clearTimeout(rt.timer);
+  if (rt.closing) return;
   if (!rt.def.url) { rt.conn = 'idle'; return; }
+  dropSocket(rt);
   rt.conn = 'connecting';
+  rt.connStart = Date.now();
   let ws;
   try { ws = new WebSocket(rt.def.url); }
   catch (_) { rt.conn = 'closed'; return scheduleReconnect(rt); }
   rt.ws = ws;
-  ws.onopen = () => { rt.retry = 0; rt.conn = 'open'; rt.badToken = false; };
-  ws.onmessage = (ev) => handleFrame(rt, ev.data);
+  // Handlers ignore events from a socket we have already replaced or dropped.
+  ws.onopen = () => { if (rt.ws !== ws) return; rt.retry = 0; rt.conn = 'open'; rt.badToken = false; rt.lastFrame = Date.now(); };
+  ws.onmessage = (ev) => { if (rt.ws !== ws) return; rt.lastFrame = Date.now(); handleFrame(rt, ev.data); };
   ws.onerror = () => { try { ws.close(); } catch (_) {} };
   ws.onclose = (ev) => {
-    rt.ws = null; rt.conn = 'closed'; rt.badToken = ev.code === 4001;   // 4001: relay rejected the token
-    rt.srv = null; gateControls();
-    scheduleReconnect(rt);
+    if (rt.ws !== ws) return;
+    rt.badToken = ev.code === 4001;   // 4001: relay rejected the token
+    lostSocket(rt);
   };
+}
+// Forget the current socket without waiting for its close handshake (which
+// never completes on a dead link) and stop listening to it.
+function dropSocket(rt) {
+  const ws = rt.ws;
+  if (!ws) return;
+  rt.ws = null;
+  ws.onopen = ws.onmessage = ws.onclose = null;
+  ws.onerror = () => {};
+  try { ws.close(); } catch (_) {}
+}
+function lostSocket(rt) {
+  dropSocket(rt);
+  rt.conn = 'closed';
+  rt.srv = null; gateControls();
+  scheduleReconnect(rt);
 }
 function scheduleReconnect(rt) {
   if (rt.closing) return;
@@ -150,6 +173,28 @@ function scheduleReconnect(rt) {
   clearTimeout(rt.timer);
   rt.timer = setTimeout(() => connect(rt), delay);
 }
+// A WebSocket can stay "open" for minutes after the network path died (link
+// change, NAT timeout, sleep) without the browser firing onclose. The servers
+// send a heartbeat every 5 s, so silence means the connection is gone.
+function checkSockets(now) {
+  for (const rt of state.rt.values()) {
+    if (rt.conn === 'open' && now - (rt.lastFrame || 0) > SILENT_MS) {
+      console.warn(`${rt.def.name}: no data or heartbeat for ${Math.round((now - rt.lastFrame) / 1000)} s, reconnecting`);
+      lostSocket(rt);
+    } else if (rt.conn === 'connecting' && now - (rt.connStart || 0) > CONNECT_TIMEOUT_MS) {
+      lostSocket(rt);
+    }
+  }
+}
+// Back online / tab visible again: don't wait out the backoff.
+function reconnectNow() {
+  for (const rt of state.rt.values()) {
+    if (rt.closing || !rt.def.url || rt.conn === 'connecting') continue;
+    if (rt.conn !== 'open' || Date.now() - (rt.lastFrame || 0) > 8000) { rt.retry = 0; connect(rt); }
+  }
+}
+window.addEventListener('online', reconnectNow);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) reconnectNow(); });
 function handleFrame(rt, data) {
   if (typeof data !== 'string') {
     if (typeof Blob !== 'undefined' && data instanceof Blob) { data.text().then((t) => handleFrame(rt, t)).catch(() => {}); return; }
@@ -160,7 +205,7 @@ function handleFrame(rt, data) {
   if (trimmed.startsWith('{')) {
     try {
       const m = JSON.parse(trimmed);
-      if (m && m.ctl) { if (m.kind === 'channels') setExpChannels(m.channels); else handleControl(rt, m); return; }
+      if (m && m.ctl) { if (m.kind === 'hb') return; if (m.kind === 'channels') setExpChannels(m.channels); else handleControl(rt, m); return; }
     } catch (_) {}
   }
   const ts = Date.now();
@@ -228,6 +273,7 @@ function boatStatus(rt, now) {
 }
 setInterval(() => {
   const now = Date.now();
+  checkSockets(now);
   for (const rt of state.rt.values()) {
     const st = boatStatus(rt, now);
     const rate = rt.times.filter((t) => t >= now - 1000).length;

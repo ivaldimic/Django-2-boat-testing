@@ -26,6 +26,7 @@ const path = require('path');
 const url = require('url');
 const { WebSocketServer, WebSocket } = require('ws');
 const { TestHub, fanout, noEngineHello } = require('../testengine');
+const { serverKeepAlive, clientKeepAlive } = require('../wsalive');
 
 // ---- Config ---------------------------------------------------------------
 const CONFIG_PATH = path.join(__dirname, 'config.json');
@@ -136,6 +137,7 @@ const wss = new WebSocketServer({ server: httpServer });
 
 // LAN app clients (not another bridge reading our feed as its peer).
 const appClients = () => [...wss.clients].filter((c) => !c.isPeer);
+serverKeepAlive(wss, { isApp: (c) => !c.isPeer });   // drop dead clients; heartbeat to apps
 
 wss.on('connection', (ws, req) => {
   const q = url.parse(req.url || '/', true).query;
@@ -237,7 +239,8 @@ function startUplink() {
   const wsUrl = `${base}/ws?role=pub&room=${encodeURIComponent(rc.room || 'default')}&boat=${encodeURIComponent(rc.boat || '1')}&token=${encodeURIComponent(rc.token || '')}`;
   const connect = () => {
     console.log(`Uplink: connecting to relay as boat ${rc.boat || '1'} …`);
-    uplink = new WebSocket(wsUrl);
+    uplink = new WebSocket(wsUrl, { handshakeTimeout: 10000 });
+    clientKeepAlive(uplink);   // a silently dead link is terminated -> 'close' -> retry
     uplink.on('open', () => { console.log('Uplink: connected to cloud relay.'); uplinkSend(channelsMsg); });
     uplink.on('message', (data) => {
       const s = data.toString();
@@ -273,7 +276,8 @@ function startPeer() {
   const peerUrl = String(config.peer).replace(/^http/, 'ws');
   const wsUrl = peerUrl + (peerUrl.includes('?') ? '&' : '?') + 'peer=1';
   const connect = () => {
-    peerWs = new WebSocket(wsUrl);
+    peerWs = new WebSocket(wsUrl, { handshakeTimeout: 10000 });
+    clientKeepAlive(peerWs);
     peerWs.on('open', () => console.log(`Peer: reading the other boat from ${peerUrl}`));
     peerWs.on('message', (data) => {
       const s = data.toString();

@@ -30,6 +30,7 @@ const path = require('path');
 const url = require('url');
 const { WebSocketServer } = require('ws');
 const { TestHub, fanout } = require('../testengine');
+const { serverKeepAlive } = require('../wsalive');
 
 const PORT = process.env.PORT || 10000;
 const VIEW_TOKEN = process.env.VIEW_TOKEN || '';
@@ -135,8 +136,10 @@ wss.on('connection', (ws, req) => {
   ws.on('error', () => {});
 });
 
-// Keep-alive ping so idle connections aren't dropped by proxies.
-setInterval(() => { for (const ws of wss.clients) if (ws.readyState === 1) { try { ws.ping(); } catch (_) {} } }, 30000);
+// Keep-alive: ping everyone (keeps proxies from idling us out) and drop
+// connections that stop answering, e.g. a bridge whose Starlink/5G link
+// changed address. Viewers also get an app-level heartbeat (see wsalive.js).
+serverKeepAlive(wss, { isApp: (ws) => ws._meta && !ws._meta.isPub });
 
 server.listen(PORT, () => {
   console.log(`Relay + app on :${PORT}`);

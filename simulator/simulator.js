@@ -17,6 +17,7 @@
  */
 
 const { WebSocketServer } = require('ws');
+const { serverKeepAlive } = require('../wsalive');
 const fs = require('fs');
 const path = require('path');
 const { TestHub, fanout } = require('../testengine');
@@ -123,6 +124,7 @@ const hub = new TestHub({
 });
 
 boats.forEach((b, i) => {
+  serverKeepAlive(b.wss);
   b.wss.on('connection', (ws) => {
     ws.boatIdx = i;
     console.log(`${b.name}: app connected (${b.wss.clients.size} on port ${b.port})`);
